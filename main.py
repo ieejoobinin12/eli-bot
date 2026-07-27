@@ -3,7 +3,6 @@ import os
 import urllib.request
 import base64
 import json
-import urllib.parse
 import discord
 from discord.ext import commands
 
@@ -12,7 +11,10 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')  # You'll add this token in Railway variables
+# Debug check
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
+print(f"DEBUG: GITHUB_TOKEN loaded? {'Yes (Length: ' + str(len(GITHUB_TOKEN)) + ')' if GITHUB_TOKEN else 'NO - MISSING!'}")
+
 REPO_NAME = "ieejoobinin12/eli-bot"
 
 @bot.event
@@ -46,7 +48,6 @@ async def drop(ctx):
 
 @bot.command()
 async def addcard(dtx, *, content: str = None):
-    # Only allow certain people or anyone you hire (you can add role/user checks later)
     if not content or "|" not in content:
         await dtx.send("Usage: `!addcard Card Name | Image_URL`")
         return
@@ -56,7 +57,6 @@ async def addcard(dtx, *, content: str = None):
         return
 
     try:
-        # 1. Get current cards.txt from GitHub API
         api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/cards.txt"
         req = urllib.request.Request(api_url, headers={
             "Authorization": f"Bearer {GITHUB_TOKEN}",
@@ -68,11 +68,9 @@ async def addcard(dtx, *, content: str = None):
             sha = data['sha']
             current_content = base64.b64decode(data['content']).decode('utf-8')
 
-        # 2. Append new card
         new_content = current_content.strip() + "\n" + content.strip() + "\n"
         encoded_content = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
 
-        # 3. Push update back to GitHub
         payload = json.dumps({
             "message": f"Add new card via Discord by {dtx.author}",
             "content": encoded_content,
