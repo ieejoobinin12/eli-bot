@@ -11,16 +11,16 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # List of cards with a title and an image link
 cards_list = [
     {
-        "name": "Fire Dragon 🔥", 
-        "image": "https://i.imgur.com/example1.png"
+        "name": "eli & ano", 
+        "image": "https://cdn.discordapp.com/attachments/1531251680266686466/1531257522802004068/Sans_titre_203_20260411231744-1.jpg?ex=6a688e32&is=6a673cb2&hm=796fd2af083030a2efcd7f50cd2d2b9f7c414e41570aa5adabb0bbd28edeb03d&"
     },
     {
-        "name": "Shadow Knight ⚔️", 
-        "image": "https://i.imgur.com/example2.png"
+        "name": "eli", 
+        "image": "https://cdn.discordapp.com/attachments/1531251680266686466/1531257569098596392/Sans_titre_224_20260711201844-1.png?ex=6a688e3d&is=6a673cbd&hm=a5f71918bd5872f78a10abb7783500bd454111b5139cd0cfab25294627baff96&"
     },
     {
-        "name": "Cosmic Angel ✨", 
-        "image": "https://i.imgur.com/example3.png"
+        "name": "tung tung tung sahur", 
+        "image": "https://cdn.discordapp.com/attachments/1531251680266686466/1531257590477095103/506410c5e062a21589fef3fd0bd6a575.webp.jpg?ex=6a688e42&is=6a673cc2&hm=74508743aaaa03ed35297306ef11d6f41362caa8ca0bf20cb711dbd06b94f5a7& "
     }
 ]
 
