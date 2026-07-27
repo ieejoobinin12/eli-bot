@@ -1,4 +1,6 @@
-python main.py
+discord.py
+requests
+
 
 
 
