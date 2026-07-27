@@ -88,6 +88,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}!")
 
 @bot.command()
+@commands.cooldown(1, 900, commands.BucketType.user)
 async def drop(ctx):
     try:
         url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt"
@@ -147,6 +148,13 @@ async def drop(ctx):
         await ctx.send(embed=embed, file=file, view=view)
     except Exception as e:
         await ctx.send(f"Oops! Couldn't load the cards right now: {e}")
+
+@drop.error
+async def drop_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        minutes = int(error.retry_after // 60)
+        seconds = int(error.retry_after % 60)
+        await ctx.send(f"⏳ {ctx.author.mention}, please wait **{minutes}m {seconds}s** before dropping cards again!")
 
 @bot.command()
 async def collection(ctx):
