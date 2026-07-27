@@ -1,5 +1,9 @@
 import random
 import os
+import urllib.request
+import base64
+import json
+import urllib.parse
 import discord
 from discord.ext import commands
 
@@ -8,21 +12,8 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# List of cards with a title and an image link
-cards_list = [
-    {
-        "name": "eli & ano", 
-        "image": "https://cdn.discordapp.com/attachments/1531251680266686466/1531257522802004068/Sans_titre_203_20260411231744-1.jpg?ex=6a688e32&is=6a673cb2&hm=796fd2af083030a2efcd7f50cd2d2b9f7c414e41570aa5adabb0bbd28edeb03d&"
-    },
-    {
-        "name": "eli", 
-        "image": "https://cdn.discordapp.com/attachments/1531251680266686466/1531257569098596392/Sans_titre_224_20260711201844-1.png?ex=6a688e3d&is=6a673cbd&hm=a5f71918bd5872f78a10abb7783500bd454111b5139cd0cfab25294627baff96&"
-    },
-    {
-        "name": "tung tung tung sahur", 
-        "image": "https://cdn.discordapp.com/attachments/1531251680266686466/1531257590477095103/506410c5e062a21589fef3fd0bd6a575.webp.jpg?ex=6a688e42&is=6a673cc2&hm=74508743aaaa03ed35297306ef11d6f41362caa8ca0bf20cb711dbd06b94f5a7& "
-    }
-]
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')  # You'll add this token in Railway variables
+REPO_NAME = "ieejoobinin12/eli-bot"
 
 @bot.event
 async def on_ready():
@@ -30,19 +21,78 @@ async def on_ready():
 
 @bot.command()
 async def drop(ctx):
-    # Pick a random card dictionary
-    card = random.choice(cards_list)
-    
-    # Create a nice Discord embed for the card
-    embed = discord.Embed(
-        title="🃏 A card has dropped!",
-        description=f"You found: **{card['name']}**",
-        color=discord.Color.blue()
-    )
-    embed.set_image(url=card['image'])
-    
-    await ctx.send(embed=embed)
+    try:
+        url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt"
+        response = urllib.request.urlopen(url)
+        lines = response.read().decode('utf-8').splitlines()
+        
+        if not lines:
+            await ctx.send("No cards found in the database yet!")
+            return
+            
+        chosen_line = random.choice(lines)
+        name, image_url = chosen_line.split("|")
+        
+        embed = discord.Embed(
+            title="🃏 A card has dropped!",
+            description=f"You found: **{name.strip()}**",
+            color=discord.Color.blue()
+        )
+        embed.set_image(url=image_url.strip())
+        
+        await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send("Oops! Couldn't load the cards right now.")
+
+@bot.command()
+async def addcard(dtx, *, content: str = None):
+    # Only allow certain people or anyone you hire (you can add role/user checks later)
+    if not content or "|" not in content:
+        await dtx.send("Usage: `!addcard Card Name | Image_URL`")
+        return
+
+    if not GITHUB_TOKEN:
+        await dtx.send("Error: GITHUB_TOKEN environment variable is missing on Railway!")
+        return
+
+    try:
+        # 1. Get current cards.txt from GitHub API
+        api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/cards.txt"
+        req = urllib.request.Request(api_url, headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json"
+        })
+        
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            sha = data['sha']
+            current_content = base64.b64decode(data['content']).decode('utf-8')
+
+        # 2. Append new card
+        new_content = current_content.strip() + "\n" + content.strip() + "\n"
+        encoded_content = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
+
+        # 3. Push update back to GitHub
+        payload = json.dumps({
+            "message": f"Add new card via Discord by {dtx.author}",
+            "content": encoded_content,
+            "sha": sha
+        }).encode('utf-8')
+
+        update_req = urllib.request.Request(api_url, data=payload, headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json"
+        }, method="PUT")
+
+        with urllib.request.urlopen(update_req):
+            pass
+
+        await dtx.send(f"✅ Successfully added new card: **{content.split('|')[0].strip()}**!")
+    except Exception as e:
+        await dtx.send(f"Failed to add card: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
 
