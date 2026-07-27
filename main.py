@@ -1,5 +1,5 @@
 
-    @bot.command()
+    bot.command()
 async def drop(ctx):
     try:
         url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt"
