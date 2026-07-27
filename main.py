@@ -3,6 +3,8 @@ import random
 import urllib.request
 import base64
 import json
+from io import BytesIO
+from PIL import Image
 import discord
 from discord.ext import commands
 
@@ -103,17 +105,45 @@ async def drop(ctx):
         parts1 = chosen_cards[0].split("|", 2)
         parts2 = chosen_cards[1].split("|", 2)
         
-        c1_name, c1_series, img1 = parts1[0].strip(), parts1[1].strip(), parts1[2].strip()
-        c2_name, c2_series, img2 = parts2[0].strip(), parts2[1].strip(), parts2[2].strip()
+        c1_name, c1_series, img1_url = parts1[0].strip(), parts1[1].strip(), parts1[2].strip()
+        c2_name, c2_series, img2_url = parts2[0].strip(), parts2[1].strip(), parts2[2].strip()
         
-        embed1 = discord.Embed(title=f"1️⃣ {c1_name}", description=f"*{c1_series}*", color=discord.Color.blurple())
-        embed1.set_image(url=img1)
+        # Download and merge images side-by-side using Pillow
+        img1_res = urllib.request.urlopen(img1_url)
+        img2_res = urllib.request.urlopen(img2_url)
         
-        embed2 = discord.Embed(title=f"2️⃣ {c2_name}", description=f"*{c2_series}*", color=discord.Color.blurple())
-        embed2.set_image(url=img2)
+        im1 = Image.open(BytesIO(img1_res.read())).convert("RGBA")
+        im2 = Image.open(BytesIO(img2_res.read())).convert("RGBA")
         
+        # Resize to standard height matching each other (e.g., height 600px)
+        target_height = 600
+        im1 = im1.resize((int(im1.width * (target_height / im1.height)), target_height))
+        im2 = im2.resize((int(im2.width * (target_height / im2.height)), target_height))
+        
+        # Create a combined side-by-side canvas
+        gap = 20
+        combined_width = im1.width + im2.width + gap
+        combined_image = Image.new("RGBA", (combined_width, target_height), (0, 0, 0, 0))
+        
+        combined_image.paste(im1, (0, 0))
+        combined_image.paste(im2, (im1.width + gap, 0))
+        
+        buffer = BytesIO()
+        combined_image.save(buffer, format="PNG")
+        buffer.seek(0)
+        
+        file = discord.File(buffer, filename="drop.png")
         view = MultiClaimView(c1_name, c2_name)
-        await ctx.send(content=f"✨ {ctx.author.mention} eli ig is dropping 2 cards!", embeds=[embed1, embed2], view=view)
+        
+        description = f"1️⃣ **{c1_name}** (*{c1_series}*)\n2️⃣ **{c2_name}** (*{c2_series}*)"
+        embed = discord.Embed(
+            title=f"✨ {ctx.author.display_name} eli ig is dropping 2 cards!",
+            description=description,
+            color=discord.Color.blurple()
+        )
+        embed.set_image(url="attachment://drop.png")
+        
+        await ctx.send(embed=embed, file=file, view=view)
     except Exception as e:
         await ctx.send(f"Oops! Couldn't load the cards right now: {e}")
 
@@ -201,7 +231,7 @@ async def addcard(ctx, *, data_input: str):
             pass
 
         await ctx.send(f"✅ Successfully added new card: **{name}** from **{series}**!")
-    except Exception as e:
+    exceptException as e:
         await ctx.send(f"Failed to add card: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
