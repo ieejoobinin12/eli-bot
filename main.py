@@ -43,4 +43,3 @@ async def drop(ctx):
         await ctx.send(file=file, embed=embed)
     except Exception as e:
         await ctx.send(f"Oops! Couldn't load the framed card right now: {e}")
-
