@@ -1,4 +1,4 @@
-import os
+  import os
 import random
 import urllib.request
 import base64
@@ -92,28 +92,28 @@ async def drop(ctx):
         response = urllib.request.urlopen(url)
         lines = response.read().decode('utf-8').splitlines()
         
-        valid_cards = [line for line in lines if "|" in line]
+        valid_cards = [line for line in lines if line.count("|") >= 2]
         
         if len(valid_cards) < 2:
-            await ctx.send("You need at least 2 cards in `cards.txt` to do a 2-card drop! Use `eaddcard` to add more.")
+            await ctx.send("You need at least 2 properly formatted cards in `cards.txt`! Use `eaddcard [Name] | [Series] | [URL]`")
             return
             
         chosen_cards = random.sample(valid_cards, 2)
         
-        name1, img1 = chosen_cards[0].split("|", 1)
-        name2, img2 = chosen_cards[1].split("|", 1)
+        parts1 = chosen_cards[0].split("|", 2)
+        parts2 = chosen_cards[1].split("|", 2)
         
-        c1_name = name1.strip()
-        c2_name = name2.strip()
+        c1_name, c1_series, img1 = parts1[0].strip(), parts1[1].strip(), parts1[2].strip()
+        c2_name, c2_series, img2 = parts2[0].strip(), parts2[1].strip(), parts2[2].strip()
         
         embeds = []
         
-        embed1 = discord.Embed(title=f"1️⃣ {c1_name}", color=discord.Color.blurple())
-        embed1.set_image(url=img1.strip())
+        embed1 = discord.Embed(title=f"1️⃣ {c1_name}", description=f"*{c1_series}*", color=discord.Color.blurple())
+        embed1.set_image(url=img1)
         embeds.append(embed1)
         
-        embed2 = discord.Embed(title=f"2️⃣ {c2_name}", color=discord.Color.blurple())
-        embed2.set_image(url=img2.strip())
+        embed2 = discord.Embed(title=f"2️⃣ {c2_name}", description=f"*{c2_series}*", color=discord.Color.blurple())
+        embed2.set_image(url=img2)
         embeds.append(embed2)
         
         view = MultiClaimView(c1_name, c2_name)
@@ -155,12 +155,18 @@ async def collection(ctx):
         await ctx.send(f"Could not load your collection: {e}")
 
 @bot.command()
-async def addcard(ctx, name: str, image_url: str):
+async def addcard(ctx, *, data_input: str):
     if not GITHUB_TOKEN:
         await ctx.send("Error: GITHUB_TOKEN environment variable is missing on Railway!")
         return
 
-    entry = f"{name} | {image_url}"
+    parts = [p.strip() for p in data_input.split("|")]
+    if len(parts) < 3:
+        await ctx.send("❌ Incorrect format! Please use:\n`eaddcard Name | Series | ImageURL`")
+        return
+
+    name, series, image_url = parts[0], parts[1], parts[2]
+    entry = f"{name} ({series}) | {image_url}"
 
     try:
         api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/cards.txt"
@@ -178,7 +184,7 @@ async def addcard(ctx, name: str, image_url: str):
             sha = None
             current_content = ""
 
-        new_content = current_content.strip() + "\n" + entry + "\n"
+        new_content = current_content.strip() + "\n" + f"{name} | {series} | {image_url}" + "\n"
         encoded_content = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
 
         payload_data = {
@@ -199,12 +205,9 @@ async def addcard(ctx, name: str, image_url: str):
         with urllib.request.urlopen(update_req):
             pass
 
-        await ctx.send(f"✅ Successfully added new card: **{name}**!")
+        await ctx.send(f"✅ Successfully added new card: **{name}** from **{series}**!")
     except Exception as e:
         await ctx.send(f"Failed to add card: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
-
-        
-                    
-        
+  
