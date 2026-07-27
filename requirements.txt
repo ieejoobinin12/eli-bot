@@ -1,6 +1,5 @@
-discord.py
-requests
-Pillow
+python main.py
+
 
 
 
