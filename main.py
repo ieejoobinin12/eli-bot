@@ -1,5 +1,6 @@
 @bot.command()
 async def collection(ctx):
+    print("DEBUG: collection command was triggered!")
     try:
         url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
         response = urllib.request.urlopen(url)
@@ -18,7 +19,6 @@ async def collection(ctx):
             await ctx.send(f"📦 {ctx.author.mention}, your collection is empty! Claim cards when they drop.")
             return
             
-        # Format the list of cards
         card_list = "\n".join([f"• {card}" for card in user_cards])
         
         embed = discord.Embed(
@@ -30,4 +30,5 @@ async def collection(ctx):
         
         await ctx.send(embed=embed)
     except Exception as e:
+        print(f"ERROR in collection: {e}")
         await ctx.send(f"Could not load your collection: {e}")
