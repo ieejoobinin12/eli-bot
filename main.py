@@ -1,4 +1,4 @@
-import os
+            import os
 import random
 import urllib.request
 import base64
@@ -9,10 +9,73 @@ from discord.ext import commands
 intents = discord.Intents.default()
 intents.message_content = True
 
-bot = commands.Bot(command_prefix="e", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 REPO_NAME = "ieejoobinin12/eli-bot"
+
+# Class for the interactive Claim Button
+class ClaimButtonView(discord.ui.View):
+    def __init__(self, card_name: str):
+        super().__init__(timeout=60) # Button expires after 60 seconds
+        self.card_name = card_name
+
+    @discord.ui.button(label="Claim Card! 🎁", style=discord.ButtonStyle.blue)
+    async def claim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user_id = str(interaction.user.id)
+        entry = f"{user_id} | {self.card_name}"
+
+        if not GITHUB_TOKEN:
+            await interaction.response.send_message("Error: GITHUB_TOKEN environment variable is missing on Railway!", ephemeral=True)
+            return
+
+        try:
+            api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/inventory.txt"
+            
+            try:
+                req = urllib.request.Request(api_url, headers={
+                    "Authorization": f"Bearer {GITHUB_TOKEN}",
+                    "Accept": "application/vnd.github+json"
+                })
+                with urllib.request.urlopen(req) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                    sha = data['sha']
+                    current_content = base64.b64decode(data['content']).decode('utf-8')
+            except Exception:
+                sha = None
+                current_content = ""
+
+            new_content = current_content.strip() + "\n" + entry + "\n"
+            encoded_content = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
+
+            payload_data = {
+                "message": f"Claim card {self.card_name} by {interaction.user}",
+                "content": encoded_content
+            }
+            if sha:
+                payload_data["sha"] = sha
+
+            payload = json.dumps(payload_data).encode('utf-8')
+
+            update_req = urllib.request.Request(api_url, data=payload, headers={
+                "Authorization": f"Bearer {GITHUB_TOKEN}",
+                "Accept": "application/vnd.github+json",
+                "Content-Type": "application/json"
+            }, method="PUT")
+
+            with urllib.request.urlopen(update_req):
+                pass
+
+            # Disable button after it's claimed so no one else can spam it
+            for child in self.children:
+                child.disabled = True
+            
+            button.label = f"Claimed by {interaction.user.display_name}"
+            await interaction.message.edit(view=self)
+            
+            await interaction.response.send_message(f"🎉 {interaction.user.mention}, you successfully claimed **{self.card_name}**!")
+        except Exception as e:
+            await interaction.response.send_message(f"Failed to claim card: {e}", ephemeral=True)
 
 @bot.event
 async def on_ready():
@@ -34,75 +97,23 @@ async def drop(ctx):
             return
             
         name, image_url = chosen_line.split("|", 1)
+        card_name = name.strip()
         
         embed = discord.Embed(
             title="🃏 Card Drop!",
-            description=f"A wild card appeared: **{name.strip()}**\nType `!claim {name.strip()}` to add it to your collection!",
+            description=f"A wild card appeared: **{card_name}**\nClick the button below to claim it!",
             color=discord.Color.gold()
         )
         embed.set_image(url=image_url.strip())
-        await ctx.send(embed=embed)
+        
+        # Attach the button view to the message
+        view = ClaimButtonView(card_name)
+        await ctx.send(embed=embed, view=view)
     except Exception as e:
         await ctx.send(f"Oops! Couldn't load the card right now: {e}")
 
 @bot.command()
-async def claim(ctx, *, card_name: str = None):
-    if not card_name:
-        await ctx.send("Please specify the name of the card you want to claim!")
-        return
-
-    if not GITHUB_TOKEN:
-        await ctx.send("Error: GITHUB_TOKEN environment variable is missing on Railway!")
-        return
-
-    user_id = str(ctx.author.id)
-    entry = f"{user_id} | {card_name.strip()}"
-
-    try:
-        api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/inventory.txt"
-        
-        # Try fetching inventory.txt, or create it if it doesn't exist yet
-        try:
-            req = urllib.request.Request(api_url, headers={
-                "Authorization": f"Bearer {GITHUB_TOKEN}",
-                "Accept": "application/vnd.github+json"
-            })
-            with urllib.request.urlopen(req) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                sha = data['sha']
-                current_content = base64.b64decode(data['content']).decode('utf-8')
-        except Exception:
-            sha = None
-            current_content = ""
-
-        new_content = current_content.strip() + "\n" + entry + "\n"
-        encoded_content = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
-
-        payload_data = {
-            "message": f"Claim card {card_name} by {ctx.author}",
-            "content": encoded_content
-        }
-        if sha:
-            payload_data["sha"] = sha
-
-        payload = json.dumps(payload_data).encode('utf-8')
-
-        update_req = urllib.request.Request(api_url, data=payload, headers={
-            "Authorization": f"Bearer {GITHUB_TOKEN}",
-            "Accept": "application/vnd.github+json",
-            "Content-Type": "application/json"
-        }, method="PUT")
-
-        with urllib.request.urlopen(update_req):
-            pass
-
-        await ctx.send(f"🎉 {ctx.author.mention}, you successfully claimed **{card_name.strip()}**!")
-    except Exception as e:
-        await ctx.send(f"Failed to claim card: {e}")
-
-@bot.command()
 async def collection(ctx):
-    print("DEBUG: collection command triggered!")
     try:
         url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
         response = urllib.request.urlopen(url)
@@ -132,7 +143,6 @@ async def collection(ctx):
         
         await ctx.send(embed=embed)
     except Exception as e:
-        print(f"ERROR in collection: {e}")
         await ctx.send(f"Could not load your collection: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
