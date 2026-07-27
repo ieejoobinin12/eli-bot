@@ -14,15 +14,15 @@ bot = commands.Bot(command_prefix="e", intents=intents)
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 REPO_NAME = "ieejoobinin12/eli-bot"
 
-class ClaimButtonView(discord.ui.View):
-    def __init__(self, card_name: str):
+class MultiClaimView(discord.ui.View):
+    def __init__(self, card1_name: str, card2_name: str):
         super().__init__(timeout=60)
-        self.card_name = card_name
+        self.card1_name = card1_name
+        self.card2_name = card2_name
 
-    @discord.ui.button(label="Claim Card! 🎁", style=discord.ButtonStyle.green)
-    async def claim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def claim_card(self, interaction: discord.Interaction, card_name: str, button: discord.ui.Button):
         user_id = str(interaction.user.id)
-        entry = f"{user_id} | {self.card_name}"
+        entry = f"{user_id} | {card_name}"
 
         if not GITHUB_TOKEN:
             await interaction.response.send_message("Error: GITHUB_TOKEN environment variable is missing on Railway!", ephemeral=True)
@@ -48,7 +48,7 @@ class ClaimButtonView(discord.ui.View):
             encoded_content = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
 
             payload_data = {
-                "message": f"Claim card {self.card_name} by {interaction.user}",
+                "message": f"Claim card {card_name} by {interaction.user}",
                 "content": encoded_content
             }
             if sha:
@@ -65,15 +65,21 @@ class ClaimButtonView(discord.ui.View):
             with urllib.request.urlopen(update_req):
                 pass
 
-            for child in self.children:
-                child.disabled = True
-            
+            button.disabled = True
             button.label = f"Claimed by {interaction.user.display_name}"
             await interaction.message.edit(view=self)
             
-            await interaction.response.send_message(f"🎉 {interaction.user.mention}, you successfully claimed **{self.card_name}**!")
+            await interaction.response.send_message(f"🎉 {interaction.user.mention}, you successfully claimed **{card_name}**!")
         except Exception as e:
             await interaction.response.send_message(f"Failed to claim card: {e}", ephemeral=True)
+
+    @discord.ui.button(label="1", style=discord.ButtonStyle.blurple)
+    async def claim_first(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.claim_card(interaction, self.card1_name, button)
+
+    @discord.ui.button(label="2", style=discord.ButtonStyle.blurple)
+    async def claim_second(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.claim_card(interaction, self.card2_name, button)
 
 @bot.event
 async def on_ready():
@@ -86,28 +92,34 @@ async def drop(ctx):
         response = urllib.request.urlopen(url)
         lines = response.read().decode('utf-8').splitlines()
         
-        if not lines:
-            await ctx.send("No cards found in the database yet!")
+        valid_cards = [line for line in lines if "|" in line]
+        
+        if len(valid_cards) < 2:
+            await ctx.send("You need at least 2 cards in `cards.txt` to do a 2-card drop! Use `eaddcard` to add more.")
             return
             
-        chosen_line = random.choice(lines)
-        if "|" not in chosen_line:
-            return
-            
-        name, image_url = chosen_line.split("|", 1)
-        card_name = name.strip()
+        chosen_cards = random.sample(valid_cards, 2)
         
-        embed = discord.Embed(
-            title="🃏 Card Drop!",
-            description=f"A wild card appeared: **{card_name}**\nClick the button below to claim it!",
-            color=discord.Color.gold()
-        )
-        embed.set_image(url=image_url.strip())
+        name1, img1 = chosen_cards[0].split("|", 1)
+        name2, img2 = chosen_cards[1].split("|", 1)
         
-        view = ClaimButtonView(card_name)
-        await ctx.send(embed=embed, view=view)
+        c1_name = name1.strip()
+        c2_name = name2.strip()
+        
+        embeds = []
+        
+        embed1 = discord.Embed(title=f"1️⃣ {c1_name}", color=discord.Color.blurple())
+        embed1.set_image(url=img1.strip())
+        embeds.append(embed1)
+        
+        embed2 = discord.Embed(title=f"2️⃣ {c2_name}", color=discord.Color.blurple())
+        embed2.set_image(url=img2.strip())
+        embeds.append(embed2)
+        
+        view = MultiClaimView(c1_name, c2_name)
+        await ctx.send(content=f"✨ {ctx.author.mention} eli ig is dropping 2 cards!", embeds=embeds, view=view)
     except Exception as e:
-        await ctx.send(f"Oops! Couldn't load the card right now: {e}")
+        await ctx.send(f"Oops! Couldn't load the cards right now: {e}")
 
 @bot.command()
 async def collection(ctx):
@@ -192,6 +204,7 @@ async def addcard(ctx, name: str, image_url: str):
         await ctx.send(f"Failed to add card: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
+
         
                     
         
