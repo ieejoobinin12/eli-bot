@@ -1,5 +1,4 @@
-        
-    import os
+import os
 import random
 import urllib.request
 import base64
@@ -20,7 +19,7 @@ class ClaimButtonView(discord.ui.View):
         super().__init__(timeout=60)
         self.card_name = card_name
 
-    @discord.ui.button(label="Claim Card! ", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="Claim Card! 🎁", style=discord.ButtonStyle.green)
     async def claim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = str(interaction.user.id)
         entry = f"{user_id} | {self.card_name}"
@@ -133,7 +132,7 @@ async def collection(ctx):
         card_list = "\n".join([f"• {card}" for card in user_cards])
         
         embed = discord.Embed(
-            title=f" {ctx.author.display_name}'s Card Collection",
+            title=f"🃏 {ctx.author.display_name}'s Card Collection",
             description=card_list,
             color=discord.Color.blue()
         )
@@ -193,3 +192,6 @@ async def addcard(ctx, name: str, image_url: str):
         await ctx.send(f"Failed to add card: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
+        
+                    
+        
