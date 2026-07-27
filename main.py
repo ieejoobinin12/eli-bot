@@ -19,7 +19,7 @@ class ClaimButtonView(discord.ui.View):
         super().__init__(timeout=60)
         self.card_name = card_name
 
-    @discord.ui.button(label="Claim Card! 🎁", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="Claim Card", style=discord.ButtonStyle.green)
     async def claim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = str(interaction.user.id)
         entry = f"{user_id} | {self.card_name}"
@@ -71,7 +71,7 @@ class ClaimButtonView(discord.ui.View):
             button.label = f"Claimed by {interaction.user.display_name}"
             await interaction.message.edit(view=self)
             
-            await interaction.response.send_message(f"🎉 {interaction.user.mention}, you successfully claimed **{self.card_name}**!")
+            await interaction.response.send_message(f" {interaction.user.mention}, you claimed **{self.card_name}**!")
         except Exception as e:
             await interaction.response.send_message(f"Failed to claim card: {e}", ephemeral=True)
 
@@ -98,7 +98,8 @@ async def drop(ctx):
         card_name = name.strip()
         
         embed = discord.Embed(
-            title="🃏 Card Drop!",
+            title="
+              Card Drop!",
             description=f"A wild card appeared: **{card_name}**\nClick the button below to claim it!",
             color=discord.Color.gold()
         )
