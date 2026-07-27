@@ -108,19 +108,16 @@ async def drop(ctx):
         c1_name, c1_series, img1_url = parts1[0].strip(), parts1[1].strip(), parts1[2].strip()
         c2_name, c2_series, img2_url = parts2[0].strip(), parts2[1].strip(), parts2[2].strip()
         
-        # Download and merge images side-by-side using Pillow
         img1_res = urllib.request.urlopen(img1_url)
         img2_res = urllib.request.urlopen(img2_url)
         
         im1 = Image.open(BytesIO(img1_res.read())).convert("RGBA")
         im2 = Image.open(BytesIO(img2_res.read())).convert("RGBA")
         
-        # Resize to standard height matching each other (e.g., height 600px)
         target_height = 600
         im1 = im1.resize((int(im1.width * (target_height / im1.height)), target_height))
         im2 = im2.resize((int(im2.width * (target_height / im2.height)), target_height))
         
-        # Create a combined side-by-side canvas
         gap = 20
         combined_width = im1.width + im2.width + gap
         combined_image = Image.new("RGBA", (combined_width, target_height), (0, 0, 0, 0))
@@ -231,7 +228,8 @@ async def addcard(ctx, *, data_input: str):
             pass
 
         await ctx.send(f"✅ Successfully added new card: **{name}** from **{series}**!")
-    exceptException as e:
+    except Exception as e:
         await ctx.send(f"Failed to add card: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
+  
