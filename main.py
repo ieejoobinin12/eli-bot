@@ -106,18 +106,14 @@ async def drop(ctx):
         c1_name, c1_series, img1 = parts1[0].strip(), parts1[1].strip(), parts1[2].strip()
         c2_name, c2_series, img2 = parts2[0].strip(), parts2[1].strip(), parts2[2].strip()
         
-        embeds = []
-        
         embed1 = discord.Embed(title=f"1️⃣ {c1_name}", description=f"*{c1_series}*", color=discord.Color.blurple())
         embed1.set_image(url=img1)
-        embeds.append(embed1)
         
         embed2 = discord.Embed(title=f"2️⃣ {c2_name}", description=f"*{c2_series}*", color=discord.Color.blurple())
         embed2.set_image(url=img2)
-        embeds.append(embed2)
         
         view = MultiClaimView(c1_name, c2_name)
-        await ctx.send(content=f"✨ {ctx.author.mention} eli ig is dropping 2 cards!", embeds=embeds, view=view)
+        await ctx.send(content=f"✨ {ctx.author.mention} eli ig is dropping 2 cards!", embeds=[embed1, embed2], view=view)
     except Exception as e:
         await ctx.send(f"Oops! Couldn't load the cards right now: {e}")
 
