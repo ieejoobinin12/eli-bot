@@ -1,4 +1,4 @@
-  import os
+import os
 import random
 import urllib.request
 import base64
@@ -166,7 +166,6 @@ async def addcard(ctx, *, data_input: str):
         return
 
     name, series, image_url = parts[0], parts[1], parts[2]
-    entry = f"{name} ({series}) | {image_url}"
 
     try:
         api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/cards.txt"
@@ -210,4 +209,3 @@ async def addcard(ctx, *, data_input: str):
         await ctx.send(f"Failed to add card: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
-  
