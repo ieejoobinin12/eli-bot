@@ -1,4 +1,5 @@
-import os
+        
+       import os
 import random
 import urllib.request
 import base64
@@ -17,10 +18,10 @@ REPO_NAME = "ieejoobinin12/eli-bot"
 # Class for the interactive Claim Button
 class ClaimButtonView(discord.ui.View):
     def __init__(self, card_name: str):
-        super().__init__(timeout=60) # Button expires after 60 seconds
+        super().__init__(timeout=60)  # Button expires after 60 seconds
         self.card_name = card_name
 
-    @discord.ui.button(label="Claim Card! 🎁", style=discord.ButtonStyle.blue)
+    @discord.ui.button(label="Claim Card! 🎁", style=discord.ButtonStyle.green)
     async def claim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = str(interaction.user.id)
         entry = f"{user_id} | {self.card_name}"
@@ -146,3 +147,4 @@ async def collection(ctx):
         await ctx.send(f"Could not load your collection: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
+ 
