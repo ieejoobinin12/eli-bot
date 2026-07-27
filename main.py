@@ -4,16 +4,24 @@ import discord
 from discord.ext import commands
 
 intents = discord.Intents.default()
-intents.message_content = True  # Required to read commands
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# A list of your cards (you can add names, image links, or descriptions)
+# List of cards with a title and an image link
 cards_list = [
-    "Common Card: ano & eli ",
-    "Common Card: ano ",
-    "Common Card: eli",
-    "Common Card: tung tung tung sahurhttps ://cdn.discordapp.com/attachments/1450544431496429571/1531254222429884506/506410c5e062a21589fef3fd0bd6a575.webp.jpg?ex=6a688b1f&is=6a67399f&hm=9ace7896bb9e202778bf40fbf840249b60d202c3c16cd00b3bf60ed8a77b0f00&"
+    {
+        "name": "Fire Dragon 🔥", 
+        "image": "https://i.imgur.com/example1.png"
+    },
+    {
+        "name": "Shadow Knight ⚔️", 
+        "image": "https://i.imgur.com/example2.png"
+    },
+    {
+        "name": "Cosmic Angel ✨", 
+        "image": "https://i.imgur.com/example3.png"
+    }
 ]
 
 @bot.event
@@ -22,10 +30,19 @@ async def on_ready():
 
 @bot.command()
 async def drop(ctx):
-    # Picks a random card from the list
-    chosen_card = random.choice(cards_list)
-    await ctx.send(f"🃏 A card has dropped! **{chosen_card}**")
+    # Pick a random card dictionary
+    card = random.choice(cards_list)
+    
+    # Create a nice Discord embed for the card
+    embed = discord.Embed(
+        title="🃏 A card has dropped!",
+        description=f"You found: **{card['name']}**",
+        color=discord.Color.blue()
+    )
+    embed.set_image(url=card['image'])
+    
+    await ctx.send(embed=embed)
 
-# Runs the bot using the token from Railway variables
 bot.run(os.getenv('DISCORD_TOKEN'))
+
 
