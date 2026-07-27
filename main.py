@@ -1,4 +1,5 @@
-import os
+        
+    import os
 import random
 import urllib.request
 import base64
@@ -19,7 +20,7 @@ class ClaimButtonView(discord.ui.View):
         super().__init__(timeout=60)
         self.card_name = card_name
 
-    @discord.ui.button(label="Claim Card", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="Claim Card! ", style=discord.ButtonStyle.green)
     async def claim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         user_id = str(interaction.user.id)
         entry = f"{user_id} | {self.card_name}"
@@ -71,7 +72,7 @@ class ClaimButtonView(discord.ui.View):
             button.label = f"Claimed by {interaction.user.display_name}"
             await interaction.message.edit(view=self)
             
-            await interaction.response.send_message(f" {interaction.user.mention}, you claimed **{self.card_name}**!")
+            await interaction.response.send_message(f"🎉 {interaction.user.mention}, you successfully claimed **{self.card_name}**!")
         except Exception as e:
             await interaction.response.send_message(f"Failed to claim card: {e}", ephemeral=True)
 
@@ -132,7 +133,7 @@ async def collection(ctx):
         card_list = "\n".join([f"• {card}" for card in user_cards])
         
         embed = discord.Embed(
-            title=f"🃏 {ctx.author.display_name}'s Card Collection",
+            title=f" {ctx.author.display_name}'s Card Collection",
             description=card_list,
             color=discord.Color.blue()
         )
@@ -141,5 +142,54 @@ async def collection(ctx):
         await ctx.send(embed=embed)
     except Exception as e:
         await ctx.send(f"Could not load your collection: {e}")
+
+@bot.command()
+async def addcard(ctx, name: str, image_url: str):
+    if not GITHUB_TOKEN:
+        await ctx.send("Error: GITHUB_TOKEN environment variable is missing on Railway!")
+        return
+
+    entry = f"{name} | {image_url}"
+
+    try:
+        api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/cards.txt"
+        
+        try:
+            req = urllib.request.Request(api_url, headers={
+                "Authorization": f"Bearer {GITHUB_TOKEN}",
+                "Accept": "application/vnd.github+json"
+            })
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                sha = data['sha']
+                current_content = base64.b64decode(data['content']).decode('utf-8')
+        except Exception:
+            sha = None
+            current_content = ""
+
+        new_content = current_content.strip() + "\n" + entry + "\n"
+        encoded_content = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
+
+        payload_data = {
+            "message": f"Add card {name} via Discord",
+            "content": encoded_content
+        }
+        if sha:
+            payload_data["sha"] = sha
+
+        payload = json.dumps(payload_data).encode('utf-8')
+
+        update_req = urllib.request.Request(api_url, data=payload, headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json"
+        }, method="PUT")
+
+        with urllib.request.urlopen(update_req):
+            pass
+
+        await ctx.send(f"✅ Successfully added new card: **{name}**!")
+    except Exception as e:
+        await ctx.send(f"Failed to add card: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
