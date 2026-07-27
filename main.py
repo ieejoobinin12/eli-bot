@@ -1,5 +1,4 @@
-        
-       import os
+import os
 import random
 import urllib.request
 import base64
@@ -15,10 +14,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 REPO_NAME = "ieejoobinin12/eli-bot"
 
-# Class for the interactive Claim Button
 class ClaimButtonView(discord.ui.View):
     def __init__(self, card_name: str):
-        super().__init__(timeout=60)  # Button expires after 60 seconds
+        super().__init__(timeout=60)
         self.card_name = card_name
 
     @discord.ui.button(label="Claim Card! 🎁", style=discord.ButtonStyle.green)
@@ -67,7 +65,6 @@ class ClaimButtonView(discord.ui.View):
             with urllib.request.urlopen(update_req):
                 pass
 
-            # Disable button after it's claimed so no one else can spam it
             for child in self.children:
                 child.disabled = True
             
@@ -107,7 +104,6 @@ async def drop(ctx):
         )
         embed.set_image(url=image_url.strip())
         
-        # Attach the button view to the message
         view = ClaimButtonView(card_name)
         await ctx.send(embed=embed, view=view)
     except Exception as e:
@@ -147,4 +143,6 @@ async def collection(ctx):
         await ctx.send(f"Could not load your collection: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
- 
+        
+       
+            
