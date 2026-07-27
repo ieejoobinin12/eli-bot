@@ -98,8 +98,7 @@ async def drop(ctx):
         card_name = name.strip()
         
         embed = discord.Embed(
-            title="
-              Card Drop!",
+            title="🃏 Card Drop!",
             description=f"A wild card appeared: **{card_name}**\nClick the button below to claim it!",
             color=discord.Color.gold()
         )
@@ -144,6 +143,3 @@ async def collection(ctx):
         await ctx.send(f"Could not load your collection: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
-        
-       
-            
