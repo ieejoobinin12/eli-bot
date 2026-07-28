@@ -246,14 +246,17 @@ async def drop(ctx):
             im = Image.open(BytesIO(urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})).read())).convert("RGBA")
             im = im.resize((int(im.width * (600 / im.height)), 600))
             draw = ImageDraw.Draw(im)
-            try: font = ImageFont.truetype("arial.ttf", 54)
-            except: font = ImageFont.load_default()
             
-            bw, bh = 112, 66
+            try: 
+                font = ImageFont.truetype("arial.ttf", 64)
+            except: 
+                font = ImageFont.load_default()
+            
+            bw, bh = 98, 56
             bx = im.width - bw - int(im.width * 0.04)
             by = int(im.height * 0.04)
             
-            draw.rounded_rectangle([bx, by, bx + bw, by + bh], radius=14, fill=(255, 255, 255, 230), outline=(200, 200, 205), width=2)
+            draw.rounded_rectangle([bx, by, bx + bw, by + bh], radius=12, fill=(255, 255, 255, 230), outline=(200, 200, 205), width=2)
             
             text_str = str(p)
             bbox = draw.textbbox((0, 0), text_str, font=font)
