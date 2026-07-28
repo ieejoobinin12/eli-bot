@@ -1,4 +1,4 @@
-import os, random, urllib.request, base64, json, time, asyncio
+import os, random, urllib.request, base64, json, time
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import discord
@@ -15,18 +15,12 @@ claim_cooldowns = {}
 active_trade_channels = set()
 active_trade_views = {}
 
-async def _req(url, data=None, method="GET", extra_headers=None):
+async def _req(url, data=None, method="GET"):
     headers = {"User-Agent": "Mozilla/5.0"}
     if GITHUB_TOKEN:
-        headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
-        headers["Accept"] = "application/vnd.github+json"
-    if extra_headers:
-        headers.update(extra_headers)
-    
+        headers.update({"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"})
     payload = json.dumps(data).encode('utf-8') if data else None
-    if payload:
-        headers["Content-Type"] = "application/json"
-        
+    if payload: headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=payload, headers=headers, method=method)
     with urllib.request.urlopen(req) as res:
         return res.read().decode('utf-8')
@@ -72,14 +66,12 @@ class MultiClaimView(discord.ui.View):
         if user_id in claim_cooldowns and time.time() - claim_cooldowns[user_id] < 600:
             left = int(600 - (time.time() - claim_cooldowns[user_id]))
             return await interaction.response.send_message(f"⏳ Cooldown! Wait **{left//60}m {left%60}s**.", ephemeral=True)
-        
         if not GITHUB_TOKEN:
             return await interaction.response.send_message("Error: Missing GITHUB_TOKEN!", ephemeral=True)
 
         try:
             print_num = await get_card_print_number(card_name)
             api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/inventory.txt"
-            
             try:
                 res = json.loads(await _req(api_url))
                 sha, content = res['sha'], base64.b64decode(res['content']).decode('utf-8')
@@ -254,10 +246,19 @@ async def drop(ctx):
             im = Image.open(BytesIO(urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})).read())).convert("RGBA")
             im = im.resize((int(im.width * (600 / im.height)), 600))
             draw = ImageDraw.Draw(im)
-            try: font = ImageFont.truetype("arial.ttf", 135)
+            try: font = ImageFont.truetype("arial.ttf", 36)
             except: font = ImageFont.load_default()
-            draw.rectangle([im.width - 240, int(im.height * 0.22), im.width - 40, int(im.height * 0.22) + 150], fill=(50, 50, 50, 220), outline=(200, 200, 200), width=4)
-            draw.text((im.width - 240 + (200 - draw.textbbox((0, 0), str(p), font=font)[2])//2, int(im.height * 0.22) + 25), str(p), fill=(255, 255, 255), font=font)
+            
+            bw, bh = 70, 36
+            bx = im.width - bw - int(im.width * 0.04)
+            by = int(im.height * 0.04)
+            
+            draw.rounded_rectangle([bx, by, bx + bw, by + bh], radius=6, fill=(120, 120, 130, 230), outline=(230, 230, 235), width=2)
+            
+            text_str = str(p)
+            bbox = draw.textbbox((0, 0), text_str, font=font)
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.text((bx + (bw - tw) // 2, by + (bh - th) // 2 - 4), text_str, fill=(255, 255, 255), font=font)
             return im
 
         im1, im2 = load_img(i1, p1), load_img(i2, p2)
