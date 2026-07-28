@@ -55,6 +55,21 @@ async def save_economy_data(new_content, sha, commit_message):
     with urllib.request.urlopen(update_req):
         pass
 
+async def get_user_cards(user_id):
+    try:
+        url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        lines = urllib.request.urlopen(req).read().decode('utf-8').splitlines()
+        user_cards = []
+        for line in lines:
+            if "|" in line:
+                owner, card = line.split("|", 1)
+                if owner.strip() == str(user_id):
+                    user_cards.append(card.strip())
+        return user_cards
+    except Exception:
+        return []
+
 class VoteView(discord.ui.View):
     def __init__(self, vote_url: str):
         super().__init__(timeout=180)
@@ -140,6 +155,317 @@ class MultiClaimView(discord.ui.View):
     @discord.ui.button(label="2", style=discord.ButtonStyle.blurple)
     async def claim_second(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.claim_card(interaction, self.card2_name, button)
+
+class TradeSessionView(discord.ui.View):
+    def __init__(self, author: discord.Member, target: discord.Member):
+        super().__init__(timeout=300)
+        self.author = author
+        self.target = target
+        
+        self.author_cards = []
+        self.target_cards = []
+        self.author_hearties = 0
+        self.target_hearties = 0
+        self.author_coins = 0
+        self.target_coins = 0
+        
+        self.author_locked = False
+        self.target_locked = False
+        self.author_confirmed = False
+        self.target_confirmed = False
+        
+        self.state = "active" # active -> locked -> confirmed
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.clear_items()
+        if self.state == "active":
+            lock_btn = discord.ui.Button(label="Lock", style=discord.ButtonStyle.primary, custom_id="lock")
+            decline_btn = discord.ui.Button(label="Decline", style=discord.ButtonStyle.danger, custom_id="decline")
+            lock_btn.callback = self.lock_callback
+            decline_btn.callback = self.decline_callback
+            self.add_item(lock_btn)
+            self.add_item(decline_btn)
+        elif self.state == "locked":
+            confirm_btn = discord.ui.Button(label="Confirm", style=discord.ButtonStyle.success, custom_id="confirm")
+            decline_btn = discord.ui.Button(label="Decline", style=discord.ButtonStyle.danger, custom_id="decline")
+            confirm_btn.callback = self.confirm_callback
+            decline_btn.callback = self.decline_callback
+            self.add_item(confirm_btn)
+            self.add_item(decline_btn)
+
+    def build_embed(self):
+        embed = discord.Embed(title="🤝 Trade Session", color=discord.Color.gold())
+        
+        author_offer = []
+        if self.author_cards:
+            author_offer.append(f"Cards: {', '.join(self.author_cards)}")
+        if self.author_hearties:
+            author_offer.append(f"<:hearty:1531623071067410504> {self.author_hearties} Hearts")
+        if self.author_coins:
+            author_offer.append(f"<:coiny:1531623010727891065> {self.author_coins} Coins")
+        if not author_offer:
+            author_offer.append("Nothing offered yet")
+        
+        target_offer = []
+        if self.target_cards:
+            target_offer.append(f"Cards: {', '.join(self.target_cards)}")
+        if self.target_hearties:
+            target_offer.append(f"<:hearty:1531623071067410504> {self.target_hearties} Hearts")
+        if self.target_coins:
+            target_offer.append(f"<:coiny:1531623010727891065> {self.target_coins} Coins")
+        if not target_offer:
+            target_offer.append("Nothing offered yet")
+
+        lock_status_1 = "🔒 Locked" if self.author_locked else "🔓 Unlocked"
+        confirm_status_1 = "✅ Confirmed" if self.author_confirmed else "⏳ Pending"
+        
+        lock_status_2 = "🔒 Locked" if self.target_locked else "🔓 Unlocked"
+        confirm_status_2 = "✅ Confirmed" if self.target_confirmed else "⏳ Pending"
+
+        embed.add_field(
+            name=f"{self.author.display_name}'s Offer ({lock_status_1} | {confirm_status_1})",
+            value="\n".join(author_offer),
+            inline=False
+        )
+        embed.add_field(
+            name=f"{self.target.display_name}'s Offer ({lock_status_2} | {confirm_status_2})",
+            value="\n".join(target_offer),
+            inline=False
+        )
+        
+        if self.state == "active":
+            embed.set_footer(text="Type card numbers (e.g. '67') or currency ('1 hearty', '100 coiny') to add to your offer!")
+        elif self.state == "locked":
+            embed.set_footer(text="Both parties locked! Click Confirm to finalize.")
+        return embed
+
+    async def lock_callback(self, interaction: discord.Interaction):
+        if interaction.user not in (self.author, self.target):
+            await interaction.response.send_message("You are not part of this trade!", ephemeral=True)
+            return
+
+        if interaction.user == self.author:
+            self.author_locked = True
+        else:
+            self.target_locked = True
+
+        if self.author_locked and self.target_locked:
+            self.state = "locked"
+            self.update_buttons()
+
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def confirm_callback(self, interaction: discord.Interaction):
+        if interaction.user not in (self.author, self.target):
+            await interaction.response.send_message("You are not part of this trade!", ephemeral=True)
+            return
+
+        if interaction.user == self.author:
+            self.author_confirmed = True
+        else:
+            self.target_confirmed = True
+
+        if self.author_confirmed and self.target_confirmed:
+            success = await execute_trade(self.author, self.target, self.author_cards, self.target_cards, self.author_hearties, self.target_hearties)
+            if success:
+                self.stop()
+                embed = discord.Embed(title="🤝 Trade Successful!", description=f"Trade between {self.author.mention} and {self.target.mention} completed successfully!", color=discord.Color.green())
+                await interaction.response.edit_message(embed=embed, view=None)
+                return
+            else:
+                await interaction.response.send_message("❌ Trade failed due to inventory/economy updates. Please try again.", ephemeral=True)
+                return
+
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def decline_callback(self, interaction: discord.Interaction):
+        if interaction.user not in (self.author, self.target):
+            await interaction.response.send_message("You are not part of this trade!", ephemeral=True)
+            return
+        self.stop()
+        embed = discord.Embed(title="❌ Trade Cancelled", description=f"Trade was cancelled by {interaction.user.mention}.", color=discord.Color.red())
+        await interaction.response.edit_message(embed=embed, view=None)
+
+
+class TradeRequestView(discord.ui.View):
+    def __init__(self, author: discord.Member, target: discord.Member):
+        super().__init__(timeout=60)
+        self.author = author
+        self.target = target
+        self.accepted = False
+
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.target:
+            await interaction.response.send_message("This trade request is not for you!", ephemeral=True)
+            return
+        self.accepted = True
+        self.stop()
+        
+        trade_view = TradeSessionView(self.author, self.target)
+        embed = trade_view.build_embed()
+        await interaction.response.edit_message(content=f"🤝 Trade started between {self.author.mention} and {self.target.mention}!", embed=embed, view=trade_view)
+        
+        bot.loop.create_task(listen_for_trade_chat(interaction.channel, self.author, self.target, trade_view))
+
+    @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
+    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.target:
+            await interaction.response.send_message("This trade request is not for you!", ephemeral=True)
+            return
+        self.stop()
+        await interaction.response.edit_message(content=f"❌ {self.target.mention} declined the trade request.", embed=None, view=None)
+
+async def listen_for_trade_chat(channel, author, target, trade_view):
+    def check(m):
+        return m.channel == channel and m.author in (author, target) and trade_view.state == "active"
+
+    while not trade_view.is_finished():
+        try:
+            msg = await bot.wait_for('message', timeout=300, check=check)
+            content = msg.content.strip().lower()
+            user = msg.author
+            
+            try:
+                await msg.delete()
+            except:
+                pass
+
+            user_cards = await get_user_cards(user.id)
+            
+            if content.isdigit():
+                card_idx = int(content)
+                if 1 <= card_idx <= len(user_cards):
+                    card_name = user_cards[card_idx - 1]
+                    if user == author:
+                        if card_name not in trade_view.author_cards:
+                            trade_view.author_cards.append(card_name)
+                    else:
+                        if card_name not in trade_view.target_cards:
+                            trade_view.target_cards.append(card_name)
+            elif "hearty" in content or "hearties" in content:
+                parts = content.split()
+                try:
+                    amount = int(parts[0])
+                    if user == author:
+                        trade_view.author_hearties += amount
+                    else:
+                        trade_view.target_hearties += amount
+                except:
+                    if user == author:
+                        trade_view.author_hearties += 1
+                    else:
+                        trade_view.target_hearties += 1
+            elif "coiny" in content or "coins" in content:
+                parts = content.split()
+                try:
+                    amount = int(parts[0])
+                    if user == author:
+                        trade_view.author_coins += amount
+                    else:
+                        trade_view.target_coins += amount
+                except:
+                    if user == author:
+                        trade_view.author_coins += 100
+                    else:
+                        trade_view.target_coins += 100
+
+            try:
+                # Update the message embed dynamically via the stored view
+                # We can find the message or just send an update if we stored message ref, but let's edit via a separate approach if needed or let buttons handle updates. 
+                # Actually, standard way is to edit message via channel if message object is accessible, or let the user see updates when they click a button. Let's send a temporary notification or edit if possible.
+                pass
+            except:
+                pass
+        except asyncio.TimeoutError:
+            break
+        except Exception:
+            break
+
+async def execute_trade(author, target, author_cards, target_cards, author_hearties, target_hearties):
+    try:
+        api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/inventory.txt"
+        req = urllib.request.Request(api_url, headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json"
+        })
+        res = urllib.request.urlopen(req)
+        data = json.loads(res.read().decode('utf-8'))
+        sha = data['sha']
+        inv_content = base64.b64decode(data['content']).decode('utf-8')
+
+        lines = inv_content.splitlines()
+        new_lines = []
+
+        # Remove cards from respective owners and add to new owners
+        # To handle multiple duplicates correctly, process line by line
+        author_remaining_cards_to_give = list(author_cards)
+        target_remaining_cards_to_give = list(target_cards)
+
+        for line in lines:
+            if "|" in line:
+                owner, card = line.split("|", 1)
+                owner = owner.strip()
+                card = card.strip()
+                
+                if owner == str(author.id) and card in author_remaining_cards_to_give:
+                    author_remaining_cards_to_give.remove(card)
+                    new_lines.append(f"{target.id} | {card}")
+                elif owner == str(target.id) and card in target_remaining_cards_to_give:
+                    target_remaining_cards_to_give.remove(card)
+                    new_lines.append(f"{author.id} | {card}")
+                else:
+                    new_lines.append(line)
+            else:
+                if line.strip():
+                    new_lines.append(line)
+
+        updated_inv = "\n".join(new_lines) + "\n"
+        
+        payload_data = {
+            "message": f"Execute trade between {author} and {target}",
+            "content": base64.b64encode(updated_inv.encode('utf-8')).decode('utf-8'),
+            "sha": sha
+        }
+        
+        update_req = urllib.request.Request(api_url, data=json.dumps(payload_data).encode('utf-8'), headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json"
+        }, method="PUT")
+        with urllib.request.urlopen(update_req):
+            pass
+
+        # Handle Hearties economy update
+        if author_hearties > 0 or target_hearties > 0:
+            eco_sha, eco_content = await get_economy_data()
+            eco_lines = eco_content.splitlines()
+            eco_dict = {}
+            for line in eco_lines:
+                if "|" in line:
+                    parts = [p.strip() for p in line.split("|")]
+                    if len(parts) >= 2:
+                        eco_dict[parts[0]] = [int(parts[1]), parts[2] if len(parts) > 2 else "0"]
+
+            # Adjust author hearties
+            if str(author.id) not in eco_dict:
+                eco_dict[str(author.id)] = [0, "0"]
+            eco_dict[str(author.id)][0] = eco_dict[str(author.id)][0] - author_hearties + target_hearties
+
+            # Adjust target hearties
+            if str(target.id) not in eco_dict:
+                eco_dict[str(target.id)] = [0, "0"]
+            eco_dict[str(target.id)][0] = eco_dict[str(target.id)][0] - target_hearties + author_hearties
+
+            new_eco_lines = [f"{uid} | {val[0]} | {val[1]}" for uid, val in eco_dict.items()]
+            await save_economy_data("\n".join(new_eco_lines) + "\n", eco_sha, f"Economy update from trade between {author} and {target}")
+
+        return True
+    except Exception as e:
+        print(f"Trade error: {e}")
+        return False
+
 
 @bot.event
 async def on_ready():
@@ -448,6 +774,24 @@ async def view(ctx, card_index: int):
         
     except Exception as e:
         await ctx.send(f"Could not view the card: {e}")
+
+@bot.command(name="trade", aliases=["et"])
+async def trade(ctx, member: discord.Member = None):
+    if not member and ctx.message.reference:
+        ref_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+        member = ref_msg.author
+
+    if not member or member == ctx.author:
+        await ctx.send("❌ Please mention a user or reply to someone to start a trade!")
+        return
+
+    view = TradeRequestView(ctx.author, member)
+    embed = discord.Embed(
+        title="🤝 Trade Request",
+        description=f"{ctx.author.mention} has requested a trade with {member.mention}!\nClick **Accept** below to open the trade session.",
+        color=discord.Color.blurple()
+    )
+    await ctx.send(content=member.mention, embed=embed, view=view)
 
 @bot.command(name="addcard")
 async def addcard(ctx, *, data_input: str):
