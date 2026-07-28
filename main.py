@@ -249,16 +249,16 @@ async def drop(ctx):
             try: font = ImageFont.truetype("arial.ttf", 36)
             except: font = ImageFont.load_default()
             
-            bw, bh = 70, 36
+            bw, bh = 78, 42
             bx = im.width - bw - int(im.width * 0.04)
             by = int(im.height * 0.04)
             
-            draw.rounded_rectangle([bx, by, bx + bw, by + bh], radius=6, fill=(120, 120, 130, 230), outline=(230, 230, 235), width=2)
+            draw.rounded_rectangle([bx, by, bx + bw, by + bh], radius=8, fill=(255, 255, 255, 230), outline=(200, 200, 205), width=2)
             
             text_str = str(p)
             bbox = draw.textbbox((0, 0), text_str, font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            draw.text((bx + (bw - tw) // 2, by + (bh - th) // 2 - 4), text_str, fill=(255, 255, 255), font=font)
+            draw.text((bx + (bw - tw) // 2, by + (bh - th) // 2 - 4), text_str, fill=(0, 0, 0), font=font)
             return im
 
         im1, im2 = load_img(i1, p1), load_img(i2, p2)
