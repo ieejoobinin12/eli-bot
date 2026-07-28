@@ -247,8 +247,8 @@ async def drop(ctx):
             im = im.resize((int(im.width * (600 / im.height)), 600))
             draw = ImageDraw.Draw(im)
             
-            # Scalable font logic (larger size = 64)
-            font_size = 64
+            # Scalable font logic
+            font_size = 28
             font = None
             font_paths = ["arial.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
             
