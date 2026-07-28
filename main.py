@@ -247,10 +247,10 @@ async def drop(ctx):
             im = im.resize((int(im.width * (600 / im.height)), 600))
             draw = ImageDraw.Draw(im)
             
-            # Scalable font logic
-            font_size = 28
+            # --- PIXELLETTERS FONT CONFIGURATION ---
+            font_size = 40
             font = None
-            font_paths = ["arial.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+            font_paths = ["pixelletters.ttf", "arial.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
             
             for path in font_paths:
                 try:
@@ -265,7 +265,7 @@ async def drop(ctx):
                 except TypeError:
                     font = ImageFont.load_default()
 
-            # Original badge container size
+            # Original container size
             bw, bh = 98, 56
             bx = im.width - bw - int(im.width * 0.04)
             by = int(im.height * 0.04)
@@ -275,7 +275,7 @@ async def drop(ctx):
             text_str = str(p)
             bbox = draw.textbbox((0, 0), text_str, font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            draw.text((bx + (bw - tw) // 2, by + (bh - th) // 2 - 4), text_str, fill=(0, 0, 0), font=font)
+            draw.text((bx + (bw - tw) // 2, by + (bh - th) // 2 - 2), text_str, fill=(0, 0, 0), font=font)
             return im
 
         im1, im2 = load_img(i1, p1), load_img(i2, p2)
