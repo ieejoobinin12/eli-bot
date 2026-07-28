@@ -214,7 +214,7 @@ async def drop_error(ctx, error):
         seconds = int(error.retry_after % 60)
         await ctx.send(f"⏳ {ctx.author.mention}, please wait **{minutes}m {seconds}s** before dropping cards again!")
 
-@bot.command(name="hearty", aliases=["balance", "bal"])
+@bot.command(name="hearty", aliases=["balance", "bal", "inv", "einv", "einventory", "inventory"])
 async def hearty(ctx):
     try:
         sha, content = await get_economy_data()
@@ -228,9 +228,19 @@ async def hearty(ctx):
                     user_hearties = int(parts[1])
                     break
 
-        await ctx.send(f"💖 {ctx.author.mention}, you have **{user_hearties}** hearty/hearties!")
+        embed = discord.Embed(
+            title="Inventory",
+            description=f"Items carried by {ctx.author.mention}",
+            color=discord.Color.dark_theme()
+        )
+        embed.add_field(
+            name="Wallet",
+            value=f"🟠 **0** · Coins\n💖 **{user_hearties}** · Hearts",
+            inline=False
+        )
+        await ctx.send(embed=embed)
     except Exception as e:
-        await ctx.send(f"Could not load balance: {e}")
+        await ctx.send(f"Could not load inventory: {e}")
 
 @bot.command(name="vote")
 async def vote(ctx):
@@ -299,11 +309,14 @@ async def ecooldown(ctx):
     drop_command = bot.get_command("drop")
     drop_text = "You can spawn a card now!"
     
-    if drop_command and drop_command.is_on_cooldown(ctx):
-        retry_seconds = drop_command._buckets.get_bucket(ctx.message).get_retry_after()
-        dmins = int(retry_seconds // 60)
-        dsecs = int(retry_seconds % 60)
-        drop_text = f"**{dmins}m {dsecs}s** left to spawn a card again."
+    if drop_command:
+        bucket = drop_command._buckets.get_bucket(ctx.message)
+        if bucket:
+            retry_seconds = bucket.get_retry_after()
+            if retry_seconds:
+                dmins = int(retry_seconds // 60)
+                dsecs = int(retry_seconds % 60)
+                drop_text = f"**{dmins}m {dsecs}s** left to spawn a card again."
 
     claim_text = "You can claim a card again now!"
     if user_id in claim_cooldowns:
@@ -339,7 +352,7 @@ async def ecooldown(ctx):
                     f"{claim_text}\n"
                     f"You can claim your daily coins now!\n"
                     f"{vote_text}\n"
-                    f"30 drops left for pity",
+                                   ,
         color=discord.Color.purple()
     )
     await ctx.send(embed=embed)
@@ -368,7 +381,7 @@ async def collection(ctx):
         card_list = "\n".join([f"• {card}" for card in user_cards])
         
         embed = discord.Embed(
-            title=f" {ctx.author.display_name}'s Card Collection",
+            title=f"🃏 {ctx.author.display_name}'s Card Collection",
             description=card_list,
             color=discord.Color.blue()
         )
