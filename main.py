@@ -6,7 +6,7 @@ import json
 import time
 import asyncio
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import discord
 from discord.ext import commands
 
@@ -83,7 +83,6 @@ async def get_card_print_number(card_name: str):
         for line in lines:
             if "|" in line:
                 owner, card = line.split("|", 1)
-                # Strip out any existing print suffix from stored inventory lines for accurate counting
                 base_card = card.split("#")[0].strip()
                 if base_card.lower() == card_name.strip().lower():
                     count += 1
@@ -469,6 +468,26 @@ async def drop(ctx):
         target_height = 600
         im1 = im1.resize((int(im1.width * (target_height / im1.height)), target_height))
         im2 = im2.resize((int(im2.width * (target_height / im2.height)), target_height))
+        
+        try:
+            font = ImageFont.truetype("arial.ttf", size=24)
+        except IOError:
+            font = ImageFont.load_default()
+
+        def draw_print_badge(card_image, print_num):
+            txt_img = card_image.copy()
+            draw = ImageDraw.Draw(txt_img)
+            text = f"Print #{print_num}"
+            
+            x = txt_img.width - 130
+            y = txt_img.height - 45
+            
+            draw.rectangle([x - 5, y - 5, txt_img.width - 10, txt_img.height - 15], fill=(0, 0, 0, 160))
+            draw.text((x, y), text, fill=(255, 255, 255), font=font)
+            return txt_img
+
+        im1 = draw_print_badge(im1, c1_print)
+        im2 = draw_print_badge(im2, c2_print)
         
         gap = 20
         combined_width = im1.width + im2.width + gap
