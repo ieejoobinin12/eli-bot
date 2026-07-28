@@ -177,7 +177,7 @@ class TradeSessionView(discord.ui.View):
         self.author_confirmed = False
         self.target_confirmed = False
         
-        self.state = "active" # active -> locked -> confirmed
+        self.state = "active"
         self.update_buttons()
 
     def update_buttons(self):
@@ -270,7 +270,7 @@ class TradeSessionView(discord.ui.View):
             self.target_confirmed = True
 
         if self.author_confirmed and self.target_confirmed:
-            success = await execute_trade(self.author, self.target, self.author_cards, self.target_cards, self.author_hearties, self.target_hearties)
+            success = await execute_trade(self.author, self.target, self.author_cards, self.target_cards, self.author_hearties, self.target_hearties, self.author_coins, self.target_coins)
             active_trade_channels.discard(interaction.channel_id)
             active_trade_views.pop(interaction.channel_id, None)
             if success:
@@ -326,7 +326,7 @@ class TradeRequestView(discord.ui.View):
         self.stop()
         await interaction.response.edit_message(content=f"❌ {self.target.mention} declined the trade request.", embed=None, view=None)
 
-async def execute_trade(author, target, author_cards, target_cards, author_hearties, target_hearties):
+async def execute_trade(author, target, author_cards, target_cards, author_hearties, target_hearties, author_coins, target_coins):
     try:
         api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/inventory.txt"
         req = urllib.request.Request(api_url, headers={
@@ -378,25 +378,31 @@ async def execute_trade(author, target, author_cards, target_cards, author_heart
         with urllib.request.urlopen(update_req):
             pass
 
-        if author_hearties > 0 or target_hearties > 0:
+        if author_hearties > 0 or target_hearties > 0 or author_coins > 0 or target_coins > 0:
             eco_sha, eco_content = await get_economy_data()
             eco_lines = eco_content.splitlines()
             eco_dict = {}
             for line in eco_lines:
                 if "|" in line:
                     parts = [p.strip() for p in line.split("|")]
-                    if len(parts) >= 2:
-                        eco_dict[parts[0]] = [int(parts[1]), parts[2] if len(parts) > 2 else "0"]
+                    if len(parts) >= 3:
+                        eco_dict[parts[0]] = [int(parts[1]), int(parts[2]), parts[3] if len(parts) > 3 else "0"]
+                    elif len(parts) == 2:
+                        eco_dict[parts[0]] = [int(parts[1]), 0, "0"]
 
             if str(author.id) not in eco_dict:
-                eco_dict[str(author.id)] = [0, "0"]
-            eco_dict[str(author.id)][0] = eco_dict[str(author.id)][0] - author_hearties + target_hearties
-
+                eco_dict[str(author.id)] = [0, 0, "0"]
             if str(target.id) not in eco_dict:
-                eco_dict[str(target.id)] = [0, "0"]
-            eco_dict[str(target.id)][0] = eco_dict[str(target.id)][0] - target_hearties + author_hearties
+                eco_dict[str(target.id)] = [0, 0, "0"]
 
-            new_eco_lines = [f"{uid} | {val[0]} | {val[1]}" for uid, val in eco_dict.items()]
+            # Hearts index 0, Coins index 1, Vote timestamp index 2
+            eco_dict[str(author.id)][0] = eco_dict[str(author.id)][0] - author_hearties + target_hearties
+            eco_dict[str(author.id)][1] = eco_dict[str(author.id)][1] - author_coins + target_coins
+
+            eco_dict[str(target.id)][0] = eco_dict[str(target.id)][0] - target_hearties + author_hearties
+            eco_dict[str(target.id)][1] = eco_dict[str(target.id)][1] - target_coins + author_coins
+
+            new_eco_lines = [f"{uid} | {val[0]} | {val[1]} | {val[2]}" for uid, val in eco_dict.items()]
             await save_economy_data("\n".join(new_eco_lines) + "\n", eco_sha, f"Economy update from trade between {author} and {target}")
 
         return True
@@ -477,18 +483,92 @@ async def drop_error(ctx, error):
         seconds = int(error.retry_after % 60)
         await ctx.send(f"⏳ {ctx.author.mention}, please wait **{minutes}m {seconds}s** before dropping cards again!")
 
+@bot.command(name="daily")
+async def daily(ctx):
+    user_id = str(ctx.author.id)
+    current_time = time.time()
+    daily_cooldown = 86400  # 24 hours
+
+    try:
+        sha, content = await get_economy_data()
+        lines = content.splitlines()
+        
+        user_found = False
+        user_hearties = 0
+        user_coins = 0
+        last_vote_time = 0
+        last_daily_time = 0
+        new_lines = []
+
+        for line in lines:
+            if "|" in line:
+                parts = [p.strip() for p in line.split("|")]
+                if parts[0] == user_id:
+                    user_found = True
+                    user_hearties = int(parts[1]) if len(parts) > 1 else 0
+                    user_coins = int(parts[2]) if len(parts) > 2 else 0
+                    # Check if there's a daily timestamp stored; we'll track it cleanly or use extra parts
+                    # Let's map economy.txt as: userid | hearties | coins | last_vote | last_daily
+                    last_vote_time = float(parts[3]) if len(parts) > 3 else 0
+                    last_daily_time = float(parts[4]) if len(parts) > 4 else 0
+                    
+                    if current_time - last_daily_time < daily_cooldown:
+                        left = int(daily_cooldown - (current_time - last_daily_time))
+                        hours = left // 3600
+                        mins = (left % 3600) // 60
+                        await ctx.send(f"⏳ {ctx.author.mention}, you already claimed your daily coins! Please wait **{hours}h {mins}m**.")
+                        return
+                    else:
+                        earned_coins = random.randint(12, 88)
+                        user_coins += earned_coins
+                        last_daily_time = current_time
+                        new_lines.append(f"{user_id} | {user_hearties} | {user_coins} | {last_vote_time} | {last_daily_time}")
+                        
+                        embed = discord.Embed(
+                            title="Daily Coiny",
+                            description=f"🎉 {ctx.author.mention}, you claimed your daily reward and received **{earned_coins}** <:coiny:1531623010727891065> coins!",
+                            color=discord.Color.green()
+                        )
+                        await ctx.send(embed=embed)
+                else:
+                    new_lines.append(line)
+            else:
+                if line.strip():
+                    new_lines.append(line)
+
+        if not user_found:
+            earned_coins = random.randint(12, 88)
+            user_coins = earned_coins
+            last_daily_time = current_time
+            new_lines.append(f"{user_id} | 0 | {user_coins} | 0 | {last_daily_time}")
+            
+            embed = discord.Embed(
+                title="Daily Coiny",
+                description=f"🎉 {ctx.author.mention}, you claimed your daily reward and received **{earned_coins}** <:coiny:1531623010727891065> coins!",
+                color=discord.Color.green()
+            )
+            await ctx.send(embed=embed)
+
+        updated_content = "\n".join(new_lines) + "\n"
+        await save_economy_data(updated_content, sha, f"Daily coins reward for {ctx.author}")
+
+    except Exception as e:
+        await ctx.send(f"Failed to process daily: {e}")
+
 @bot.command(name="hearty", aliases=["balance", "bal", "inv", "einv", "einventory", "inventory"])
 async def hearty(ctx):
     try:
         sha, content = await get_economy_data()
         user_id = str(ctx.author.id)
         user_hearties = 0
+        user_coins = 0
 
         for line in content.splitlines():
             if "|" in line:
                 parts = [p.strip() for p in line.split("|")]
                 if parts[0] == user_id:
-                    user_hearties = int(parts[1])
+                    user_hearties = int(parts[1]) if len(parts) > 1 else 0
+                    user_coins = int(parts[2]) if len(parts) > 2 else 0
                     break
 
         embed = discord.Embed(
@@ -498,7 +578,7 @@ async def hearty(ctx):
         )
         embed.add_field(
             name="Wallet",
-            value=f"<:coiny:1531623010727891065> **0** · Coins\n<:hearty:1531623071067410504> **{user_hearties}** · Hearts",
+            value=f"<:coiny:1531623010727891065> **{user_coins}** · Coins\n<:hearty:1531623071067410504> **{user_hearties}** · Hearts",
             inline=False
         )
         await ctx.send(embed=embed)
@@ -518,7 +598,9 @@ async def vote(ctx):
         
         user_found = False
         user_hearties = 0
+        user_coins = 0
         last_vote_time = 0
+        last_daily_time = 0
         new_lines = []
 
         for line in lines:
@@ -526,8 +608,10 @@ async def vote(ctx):
                 parts = [p.strip() for p in line.split("|")]
                 if parts[0] == user_id:
                     user_found = True
-                    user_hearties = int(parts[1])
-                    last_vote_time = float(parts[2]) if len(parts) > 2 else 0
+                    user_hearties = int(parts[1]) if len(parts) > 1 else 0
+                    user_coins = int(parts[2]) if len(parts) > 2 else 0
+                    last_vote_time = float(parts[3]) if len(parts) > 3 else 0
+                    last_daily_time = float(parts[4]) if len(parts) > 4 else 0
                     
                     if current_time - last_vote_time < vote_cooldown:
                         left = int(vote_cooldown - (current_time - last_vote_time))
@@ -538,7 +622,7 @@ async def vote(ctx):
                     else:
                         user_hearties += 1
                         last_vote_time = current_time
-                        new_lines.append(f"{user_id} | {user_hearties} | {last_vote_time}")
+                        new_lines.append(f"{user_id} | {user_hearties} | {user_coins} | {last_vote_time} | {last_daily_time}")
                 else:
                     new_lines.append(line)
             else:
@@ -548,7 +632,7 @@ async def vote(ctx):
         if not user_found:
             user_hearties = 1
             last_vote_time = current_time
-            new_lines.append(f"{user_id} | {user_hearties} | {last_vote_time}")
+            new_lines.append(f"{user_id} | {user_hearties} | 0 | {last_vote_time} | 0")
 
         updated_content = "\n".join(new_lines) + "\n"
         await save_economy_data(updated_content, sha, f"Vote reward for {ctx.author}")
@@ -590,20 +674,24 @@ async def ecooldown(ctx):
             csecs = left % 60
             claim_text = f"**{cmins}m {csecs}s** left to claim a card again."
 
+    daily_text = "You can claim your daily coins now!"
     vote_text = "You can vote for the bot now!"
     try:
         _, content = await get_economy_data()
         for line in content.splitlines():
             if "|" in line:
                 parts = [p.strip() for p in line.split("|")]
-                if parts[0] == str(user_id) and len(parts) > 2:
-                    last_vote = float(parts[2])
-                    v_passed = current_time - last_vote
-                    if v_passed < 43200:
-                        v_left = int(43200 - v_passed)
-                        v_hours = v_left // 3600
-                        v_mins = (v_left % 3600) // 60
-                        vote_text = f"**{v_hours}h {v_mins}m** left to vote for the bot again."
+                if parts[0] == str(user_id):
+                    if len(parts) > 3 and float(parts[3]) > 0:
+                        v_passed = current_time - float(parts[3])
+                        if v_passed < 43200:
+                            v_left = int(43200 - v_passed)
+                            vote_text = f"**{v_left // 3600}h {(v_left % 3600) // 60}m** left to vote for the bot again."
+                    if len(parts) > 4 and float(parts[4]) > 0:
+                        d_passed = current_time - float(parts[4])
+                        if d_passed < 86400:
+                            d_left = int(86400 - d_passed)
+                            daily_text = f"**{d_left // 3600}h {(d_left % 3600) // 60}m** left to claim daily coins again."
                     break
     except:
         pass
@@ -613,7 +701,7 @@ async def ecooldown(ctx):
         description=f"Cooldown for {ctx.author.mention}\n\n"
                     f"{drop_text}\n"
                     f"{claim_text}\n"
-                    f"You can claim your daily coins now!\n"
+                    f"{daily_text}\n"
                     f"{vote_text}\n"
                     f"30 drops left for pity",
         color=discord.Color.purple()
