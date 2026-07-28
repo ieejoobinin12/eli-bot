@@ -1,10 +1,4 @@
-import os
-import random
-import urllib.request
-import base64
-import json
-import time
-import asyncio
+import os, random, urllib.request, base64, json, time, asyncio
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import discord
@@ -12,7 +6,6 @@ from discord.ext import commands
 
 intents = discord.Intents.default()
 intents.message_content = True
-
 bot = commands.Bot(command_prefix="e", intents=intents)
 
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
@@ -22,1013 +15,459 @@ claim_cooldowns = {}
 active_trade_channels = set()
 active_trade_views = {}
 
+async def _req(url, data=None, method="GET", extra_headers=None):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+        headers["Accept"] = "application/vnd.github+json"
+    if extra_headers:
+        headers.update(extra_headers)
+    
+    payload = json.dumps(data).encode('utf-8') if data else None
+    if payload:
+        headers["Content-Type"] = "application/json"
+        
+    req = urllib.request.Request(url, data=payload, headers=headers, method=method)
+    with urllib.request.urlopen(req) as res:
+        return res.read().decode('utf-8')
+
 async def get_economy_data():
-    api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/economy.txt"
     try:
-        req = urllib.request.Request(api_url, headers={
-            "Authorization": f"Bearer {GITHUB_TOKEN}",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "Mozilla/5.0"
-        })
-        with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            sha = data['sha']
-            content = base64.b64decode(data['content']).decode('utf-8')
-            return sha, content
+        res = json.loads(await _req(f"https://api.github.com/repos/{REPO_NAME}/contents/economy.txt"))
+        return res['sha'], base64.b64decode(res['content']).decode('utf-8')
     except Exception:
         return None, ""
 
-async def save_economy_data(new_content, sha, commit_message):
-    api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/economy.txt"
-    payload_data = {
-        "message": commit_message,
-        "content": base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
-    }
-    if sha:
-        payload_data["sha"] = sha
-
-    payload = json.dumps(payload_data).encode('utf-8')
-    update_req = urllib.request.Request(api_url, data=payload, headers={
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0"
+async def save_economy_data(content, sha, msg):
+    await _req(f"https://api.github.com/repos/{REPO_NAME}/contents/economy.txt", {
+        "message": msg, "content": base64.b64encode(content.encode('utf-8')).decode('utf-8'), "sha": sha
     }, method="PUT")
-
-    with urllib.request.urlopen(update_req):
-        pass
 
 async def get_user_cards(user_id):
     try:
-        url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        lines = urllib.request.urlopen(req).read().decode('utf-8').splitlines()
-        user_cards = []
-        for line in lines:
-            if "|" in line:
-                owner, card = line.split("|", 1)
-                if owner.strip() == str(user_id):
-                    user_cards.append(card.strip())
-        return user_cards
+        lines = (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt")).splitlines()
+        return [card.strip() for line in lines if "|" in line for owner, card in [line.split("|", 1)] if owner.strip() == str(user_id)]
     except Exception:
         return []
 
 async def get_card_print_number(card_name: str):
     try:
-        url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        lines = urllib.request.urlopen(req).read().decode('utf-8').splitlines()
-        
-        count = 0
-        for line in lines:
-            if "|" in line:
-                owner, card = line.split("|", 1)
-                base_card = card.split("#")[0].strip()
-                if base_card.lower() == card_name.strip().lower():
-                    count += 1
-        return count + 1
+        lines = (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt")).splitlines()
+        return sum(1 for line in lines if "|" in line for owner, card in [line.split("|", 1)] if card.split("#")[0].strip().lower() == card_name.strip().lower()) + 1
     except Exception:
         return 1
 
 class VoteView(discord.ui.View):
-    def __init__(self, vote_url: str):
+    def __init__(self, vote_url):
         super().__init__(timeout=180)
         self.add_item(discord.ui.Button(label="Open vote page", url=vote_url, style=discord.ButtonStyle.link))
 
 class MultiClaimView(discord.ui.View):
-    def __init__(self, card1_name: str, card2_name: str):
+    def __init__(self, c1, c2):
         super().__init__(timeout=60)
-        self.card1_name = card1_name
-        self.card2_name = card2_name
+        self.c1, self.c2 = c1, c2
 
-    async def claim_card(self, interaction: discord.Interaction, card_name: str, button: discord.ui.Button):
+    async def claim_card(self, interaction, card_name, button):
         user_id = interaction.user.id
-        current_time = time.time()
+        if user_id in claim_cooldowns and time.time() - claim_cooldowns[user_id] < 600:
+            left = int(600 - (time.time() - claim_cooldowns[user_id]))
+            return await interaction.response.send_message(f"⏳ Cooldown! Wait **{left//60}m {left%60}s**.", ephemeral=True)
         
-        if user_id in claim_cooldowns:
-            time_passed = current_time - claim_cooldowns[user_id]
-            if time_passed < 600:
-                left = int(600 - time_passed)
-                mins = left // 60
-                secs = left % 60
-                await interaction.response.send_message(f"⏳ You are on claim cooldown! Please wait **{mins}m {secs}s** before claiming again.", ephemeral=True)
-                return
-
-        user_id_str = str(interaction.user.id)
-        print_num = await get_card_print_number(card_name)
-        entry = f"{user_id_str} | {card_name} #{print_num}"
-
         if not GITHUB_TOKEN:
-            await interaction.response.send_message("Error: GITHUB_TOKEN environment variable is missing on Railway!", ephemeral=True)
-            return
+            return await interaction.response.send_message("Error: Missing GITHUB_TOKEN!", ephemeral=True)
 
         try:
+            print_num = await get_card_print_number(card_name)
             api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/inventory.txt"
             
             try:
-                req = urllib.request.Request(api_url, headers={
-                    "Authorization": f"Bearer {GITHUB_TOKEN}",
-                    "Accept": "application/vnd.github+json"
-                })
-                with urllib.request.urlopen(req) as response:
-                    data = json.loads(response.read().decode('utf-8'))
-                    sha = data['sha']
-                    current_content = base64.b64decode(data['content']).decode('utf-8')
+                res = json.loads(await _req(api_url))
+                sha, content = res['sha'], base64.b64decode(res['content']).decode('utf-8')
             except Exception:
-                sha = None
-                current_content = ""
+                sha, content = None, ""
 
-            new_content = current_content.strip() + "\n" + entry + "\n"
-            encoded_content = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
-
-            payload_data = {
-                "message": f"Claim card {card_name} #{print_num} by {interaction.user}",
-                "content": encoded_content
-            }
-            if sha:
-                payload_data["sha"] = sha
-
-            payload = json.dumps(payload_data).encode('utf-8')
-
-            update_req = urllib.request.Request(api_url, data=payload, headers={
-                "Authorization": f"Bearer {GITHUB_TOKEN}",
-                "Accept": "application/vnd.github+json",
-                "Content-Type": "application/json"
+            new_content = f"{content.strip()}\n{interaction.user.id} | {card_name} #{print_num}\n"
+            await _req(api_url, {
+                "message": f"Claim {card_name} #{print_num}",
+                "content": base64.b64encode(new_content.encode('utf-8')).decode('utf-8'),
+                **({"sha": sha} if sha else {})
             }, method="PUT")
 
-            with urllib.request.urlopen(update_req):
-                pass
-
             claim_cooldowns[user_id] = time.time()
-
             button.disabled = True
             button.label = f"Claimed by {interaction.user.display_name}"
             await interaction.message.edit(view=self)
-            
-            await interaction.response.send_message(f"🎉 {interaction.user.mention}, you successfully claimed **{card_name}** `[Print #{print_num}]`!")
+            await interaction.response.send_message(f"🎉 {interaction.user.mention}, claimed **{card_name}** `[Print #{print_num}]`!")
         except Exception as e:
-            await interaction.response.send_message(f"Failed to claim card: {e}", ephemeral=True)
+            await interaction.response.send_message(f"Failed: {e}", ephemeral=True)
 
     @discord.ui.button(label="1", style=discord.ButtonStyle.blurple)
-    async def claim_first(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.claim_card(interaction, self.card1_name, button)
+    async def c1_btn(self, interaction, button): await self.claim_card(interaction, self.c1, button)
 
     @discord.ui.button(label="2", style=discord.ButtonStyle.blurple)
-    async def claim_second(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.claim_card(interaction, self.card2_name, button)
+    async def c2_btn(self, interaction, button): await self.claim_card(interaction, self.c2, button)
 
 class TradeSessionView(discord.ui.View):
-    def __init__(self, author: discord.Member, target: discord.Member):
+    def __init__(self, author, target):
         super().__init__(timeout=None)
-        self.author = author
-        self.target = target
-        
-        self.author_cards = []
-        self.target_cards = []
-        self.author_hearties = 0
-        self.target_hearties = 0
-        self.author_coins = 0
-        self.target_coins = 0
-        
-        self.author_locked = False
-        self.target_locked = False
-        self.author_confirmed = False
-        self.target_confirmed = False
-        
+        self.author, self.target = author, target
+        self.author_cards, self.target_cards = [], []
+        self.author_hearties = self.target_hearties = self.author_coins = self.target_coins = 0
+        self.author_locked = self.target_locked = self.author_confirmed = self.target_confirmed = False
         self.state = "active"
         self.update_buttons()
 
     def update_buttons(self):
         self.clear_items()
-        if self.state == "active":
-            lock_btn = discord.ui.Button(label="Lock", style=discord.ButtonStyle.primary, custom_id="lock")
-            decline_btn = discord.ui.Button(label="Decline", style=discord.ButtonStyle.danger, custom_id="decline")
-            lock_btn.callback = self.lock_callback
-            decline_btn.callback = self.decline_callback
-            self.add_item(lock_btn)
-            self.add_item(decline_btn)
-        elif self.state == "locked":
-            confirm_btn = discord.ui.Button(label="Confirm", style=discord.ButtonStyle.success, custom_id="confirm")
-            decline_btn = discord.ui.Button(label="Decline", style=discord.ButtonStyle.danger, custom_id="decline")
-            confirm_btn.callback = self.confirm_callback
-            decline_btn.callback = self.decline_callback
-            self.add_item(confirm_btn)
-            self.add_item(decline_btn)
+        is_locked = self.state == "locked"
+        btn1 = discord.ui.Button(label="Confirm" if is_locked else "Lock", style=discord.ButtonStyle.success if is_locked else discord.ButtonStyle.primary)
+        btn1.callback = self.confirm_callback if is_locked else self.lock_callback
+        btn2 = discord.ui.Button(label="Decline", style=discord.ButtonStyle.danger, callback=self.decline_callback)
+        self.add_item(btn1)
+        self.add_item(btn2)
 
     def build_embed(self):
         embed = discord.Embed(title="🤝 Trade Session", color=discord.Color.gold())
-        
-        author_offer = []
-        if self.author_cards:
-            author_offer.append(f"Cards: {', '.join(self.author_cards)}")
-        if self.author_hearties:
-            author_offer.append(f"<:hearty:1531623071067410504> {self.author_hearties} Hearts")
-        if self.author_coins:
-            author_offer.append(f"<:coiny:1531623010727891065> {self.author_coins} Coins")
-        if not author_offer:
-            author_offer.append("Nothing offered yet")
-        
-        target_offer = []
-        if self.target_cards:
-            target_offer.append(f"Cards: {', '.join(self.target_cards)}")
-        if self.target_hearties:
-            target_offer.append(f"<:hearty:1531623071067410504> {self.target_hearties} Hearts")
-        if self.target_coins:
-            target_offer.append(f"<:coiny:1531623010727891065> {self.target_coins} Coins")
-        if not target_offer:
-            target_offer.append("Nothing offered yet")
-
-        lock_status_1 = "🔒 Locked" if self.author_locked else "🔓 Unlocked"
-        confirm_status_1 = "✅ Confirmed" if self.author_confirmed else "⏳ Pending"
-        
-        lock_status_2 = "🔒 Locked" if self.target_locked else "🔓 Unlocked"
-        confirm_status_2 = "✅ Confirmed" if self.target_confirmed else "⏳ Pending"
-
-        embed.add_field(
-            name=f"{self.author.display_name}'s Offer ({lock_status_1} | {confirm_status_1})",
-            value="\n".join(author_offer),
-            inline=False
-        )
-        embed.add_field(
-            name=f"{self.target.display_name}'s Offer ({lock_status_2} | {confirm_status_2})",
-            value="\n".join(target_offer),
-            inline=False
-        )
-        
-        if self.state == "active":
-            embed.set_footer(text="Use 'eadd [number]' for cards or 'eadd [amount] hearty/coiny' to add to your offer!")
-        elif self.state == "locked":
-            embed.set_footer(text="Both parties locked! Click Confirm to finalize.")
+        for user, cards, h, c, l, conf in [
+            (self.author, self.author_cards, self.author_hearties, self.author_coins, self.author_locked, self.author_confirmed),
+            (self.target, self.target_cards, self.target_hearties, self.target_coins, self.target_locked, self.target_confirmed)
+        ]:
+            offer = [f"Cards: {', '.join(cards)}" if cards else "Nothing offered"]
+            if h: offer.append(f"<:hearty:1531623071067410504> {h} Hearts")
+            if c: offer.append(f"<:coiny:1531623010727891065> {c} Coins")
+            embed.add_field(name=f"{user.display_name} ({'🔒 Locked' if l else '🔓 Unlocked'} | {'✅ Confirmed' if conf else '⏳'})", value="\n".join(offer), inline=False)
         return embed
 
-    async def lock_callback(self, interaction: discord.Interaction):
-        if interaction.user not in (self.author, self.target):
-            await interaction.response.send_message("You are not part of this trade!", ephemeral=True)
-            return
-
-        if interaction.user == self.author:
-            self.author_locked = True
-        else:
-            self.target_locked = True
-
-        if self.author_locked and self.target_locked:
-            self.state = "locked"
-            self.update_buttons()
-
+    async def lock_callback(self, interaction):
+        if interaction.user not in (self.author, self.target): return
+        if interaction.user == self.author: self.author_locked = True
+        else: self.target_locked = True
+        if self.author_locked and self.target_locked: self.state = "locked"
+        self.update_buttons()
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
-    async def confirm_callback(self, interaction: discord.Interaction):
-        if interaction.user not in (self.author, self.target):
-            await interaction.response.send_message("You are not part of this trade!", ephemeral=True)
-            return
-
-        if interaction.user == self.author:
-            self.author_confirmed = True
-        else:
-            self.target_confirmed = True
-
+    async def confirm_callback(self, interaction):
+        if interaction.user not in (self.author, self.target): return
+        if interaction.user == self.author: self.author_confirmed = True
+        else: self.target_confirmed = True
+        
         if self.author_confirmed and self.target_confirmed:
             success = await execute_trade(self.author, self.target, self.author_cards, self.target_cards, self.author_hearties, self.target_hearties, self.author_coins, self.target_coins)
             active_trade_channels.discard(interaction.channel_id)
             active_trade_views.pop(interaction.channel_id, None)
             if success:
                 self.stop()
-                embed = discord.Embed(title="🤝 Trade Successful!", description=f"Trade between {self.author.mention} and {self.target.mention} completed successfully!", color=discord.Color.green())
-                await interaction.response.edit_message(embed=embed, view=None)
-                return
-            else:
-                await interaction.response.send_message("❌ Trade failed due to inventory/economy updates. Please try again.", ephemeral=True)
-                return
-
+                return await interaction.response.edit_message(embed=discord.Embed(title="🤝 Trade Successful!", color=discord.Color.green()), view=None)
+            return await interaction.response.send_message("❌ Trade failed.", ephemeral=True)
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
-    async def decline_callback(self, interaction: discord.Interaction):
-        if interaction.user not in (self.author, self.target):
-            await interaction.response.send_message("You are not part of this trade!", ephemeral=True)
-            return
+    async def decline_callback(self, interaction):
+        if interaction.user not in (self.author, self.target): return
         active_trade_channels.discard(interaction.channel_id)
         active_trade_views.pop(interaction.channel_id, None)
         self.stop()
-        embed = discord.Embed(title="❌ Trade Cancelled", description=f"Trade was cancelled by {interaction.user.mention}.", color=discord.Color.red())
-        await interaction.response.edit_message(embed=embed, view=None)
+        await interaction.response.edit_message(embed=discord.Embed(title="❌ Trade Cancelled", color=discord.Color.red()), view=None)
 
 class TradeRequestView(discord.ui.View):
-    def __init__(self, author: discord.Member, target: discord.Member):
+    def __init__(self, author, target):
         super().__init__(timeout=60)
-        self.author = author
-        self.target = target
-        self.accepted = False
+        self.author, self.target = author, target
 
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.target:
-            await interaction.response.send_message("This trade request is not for you!", ephemeral=True)
-            return
-        self.accepted = True
+    async def accept(self, interaction, button):
+        if interaction.user != self.target: return await interaction.response.send_message("Not for you!", ephemeral=True)
         self.stop()
-        
         active_trade_channels.add(interaction.channel_id)
         trade_view = TradeSessionView(self.author, self.target)
         active_trade_views[interaction.channel_id] = trade_view
-        
-        embed = trade_view.build_embed()
-        await interaction.response.edit_message(content=f"🤝 Trade started between {self.author.mention} and {self.target.mention}!", embed=embed, view=trade_view)
         trade_view.message = interaction.message
+        await interaction.response.edit_message(content=f"🤝 Trade started!", embed=trade_view.build_embed(), view=trade_view)
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
-    async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.target:
-            await interaction.response.send_message("This trade request is not for you!", ephemeral=True)
-            return
+    async def decline(self, interaction, button):
+        if interaction.user != self.target: return
         self.stop()
-        await interaction.response.edit_message(content=f"❌ {self.target.mention} declined the trade request.", embed=None, view=None)
+        await interaction.response.edit_message(content="❌ Trade declined.", embed=None, view=None)
 
-async def execute_trade(author, target, author_cards, target_cards, author_hearties, target_hearties, author_coins, target_coins):
+async def execute_trade(author, target, ac, tc, ah, th, aco, tco):
     try:
         api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/inventory.txt"
-        req = urllib.request.Request(api_url, headers={
-            "Authorization": f"Bearer {GITHUB_TOKEN}",
-            "Accept": "application/vnd.github+json"
-        })
-        res = urllib.request.urlopen(req)
-        data = json.loads(res.read().decode('utf-8'))
-        sha = data['sha']
-        inv_content = base64.b64decode(data['content']).decode('utf-8')
-
-        lines = inv_content.splitlines()
-        new_lines = []
-
-        author_remaining_cards_to_give = list(author_cards)
-        target_remaining_cards_to_give = list(target_cards)
-
+        res = json.loads(await _req(api_url))
+        sha, lines = res['sha'], base64.b64decode(res['content']).decode('utf-8').splitlines()
+        
+        new_lines, ar, tr = [], list(ac), list(tc)
         for line in lines:
             if "|" in line:
-                owner, card = line.split("|", 1)
-                owner = owner.strip()
-                card = card.strip()
-                
-                if owner == str(author.id) and card in author_remaining_cards_to_give:
-                    author_remaining_cards_to_give.remove(card)
-                    new_lines.append(f"{target.id} | {card}")
-                elif owner == str(target.id) and card in target_remaining_cards_to_give:
-                    target_remaining_cards_to_give.remove(card)
-                    new_lines.append(f"{author.id} | {card}")
-                else:
-                    new_lines.append(line)
-            else:
-                if line.strip():
-                    new_lines.append(line)
+                owner, card = map(str.strip, line.split("|", 1))
+                if owner == str(author.id) and card in ar:
+                    ar.remove(card); new_lines.append(f"{target.id} | {card}")
+                elif owner == str(target.id) and card in tr:
+                    tr.remove(card); new_lines.append(f"{author.id} | {card}")
+                else: new_lines.append(line)
+            elif line.strip(): new_lines.append(line)
 
-        updated_inv = "\n".join(new_lines) + "\n"
-        
-        payload_data = {
-            "message": f"Execute trade between {author} and {target}",
-            "content": base64.b64encode(updated_inv.encode('utf-8')).decode('utf-8'),
+        await _req(api_url, {
+            "message": f"Trade {author} & {target}",
+            "content": base64.b64encode(("\n".join(new_lines) + "\n").encode('utf-8')).decode('utf-8'),
             "sha": sha
-        }
-        
-        update_req = urllib.request.Request(api_url, data=json.dumps(payload_data).encode('utf-8'), headers={
-            "Authorization": f"Bearer {GITHUB_TOKEN}",
-            "Accept": "application/vnd.github+json",
-            "Content-Type": "application/json"
         }, method="PUT")
-        with urllib.request.urlopen(update_req):
-            pass
 
-        if author_hearties > 0 or target_hearties > 0 or author_coins > 0 or target_coins > 0:
+        if ah or th or aco or tco:
             eco_sha, eco_content = await get_economy_data()
-            eco_lines = eco_content.splitlines()
-            eco_dict = {}
-            for line in eco_lines:
+            eco = {}
+            for line in eco_content.splitlines():
                 if "|" in line:
-                    parts = [p.strip() for p in line.split("|")]
-                    if len(parts) >= 3:
-                        eco_dict[parts[0]] = [int(float(parts[1])), int(float(parts[2])), parts[3] if len(parts) > 3 else "0"]
-                    elif len(parts) == 2:
-                        eco_dict[parts[0]] = [int(float(parts[1])), 0, "0"]
+                    p = [x.strip() for x in line.split("|")]
+                    eco[p[0]] = [int(float(p[1])), int(float(p[2])), p[3] if len(p) > 3 else "0"]
+            
+            for uid in (str(author.id), str(target.id)):
+                if uid not in eco: eco[uid] = [0, 0, "0"]
 
-            if str(author.id) not in eco_dict:
-                eco_dict[str(author.id)] = [0, 0, "0"]
-            if str(target.id) not in eco_dict:
-                eco_dict[str(target.id)] = [0, 0, "0"]
+            eco[str(author.id)][0] += th - ah
+            eco[str(author.id)][1] += tco - aco
+            eco[str(target.id)][0] += ah - th
+            eco[str(target.id)][1] += aco - tco
 
-            eco_dict[str(author.id)][0] = eco_dict[str(author.id)][0] - author_hearties + target_hearties
-            eco_dict[str(author.id)][1] = eco_dict[str(author.id)][1] - author_coins + target_coins
-
-            eco_dict[str(target.id)][0] = eco_dict[str(target.id)][0] - target_hearties + author_hearties
-            eco_dict[str(target.id)][1] = eco_dict[str(target.id)][1] - target_coins + author_coins
-
-            new_eco_lines = [f"{uid} | {val[0]} | {val[1]} | {val[2]}" for uid, val in eco_dict.items()]
-            await save_economy_data("\n".join(new_eco_lines) + "\n", eco_sha, f"Economy update from trade between {author} and {target}")
-
+            await save_economy_data("\n".join([f"{k} | {v[0]} | {v[1]} | {v[2]}" for k, v in eco.items()]) + "\n", eco_sha, "Trade eco update")
         return True
     except Exception as e:
-        print(f"Trade error: {e}")
+        print(e)
         return False
 
 @bot.event
-async def on_ready():
-    print(f"Logged in successfully as {bot.user}!")
+async def on_ready(): print(f"Logged in as {bot.user}!")
 
 @bot.command(name="drop")
 @commands.cooldown(1, 900, commands.BucketType.user)
 async def drop(ctx):
     try:
-        url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt"
-        req_cards = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        response = urllib.request.urlopen(req_cards)
-        lines = response.read().decode('utf-8').splitlines()
+        valid_cards = [line for line in (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt")).splitlines() if line.count("|") >= 2]
+        if len(valid_cards) < 2: return await ctx.send("Need at least 2 cards in `cards.txt`!")
         
-        valid_cards = [line for line in lines if line.count("|") >= 2]
+        c1, c2 = random.sample(valid_cards, 2)
+        n1, s1, i1 = map(str.strip, c1.split("|", 2))
+        n2, s2, i2 = map(str.strip, c2.split("|", 2))
         
-        if len(valid_cards) < 2:
-            await ctx.send("You need at least 2 properly formatted cards in `cards.txt`! Use `eaddcard [Name] | [Series] | [URL]`")
-            return
-            
-        chosen_cards = random.sample(valid_cards, 2)
+        p1, p2 = await get_card_print_number(n1), await get_card_print_number(n2)
         
-        parts1 = chosen_cards[0].split("|", 2)
-        parts2 = chosen_cards[1].split("|", 2)
-        
-        c1_name, c1_series, img1_url = parts1[0].strip(), parts1[1].strip(), parts1[2].strip()
-        c2_name, c2_series, img2_url = parts2[0].strip(), parts2[1].strip(), parts2[2].strip()
-        
-        c1_print = await get_card_print_number(c1_name)
-        c2_print = await get_card_print_number(c2_name)
-        
-        req_img1 = urllib.request.Request(img1_url, headers={'User-Agent': 'Mozilla/5.0'})
-        req_img2 = urllib.request.Request(img2_url, headers={'User-Agent': 'Mozilla/5.0'})
-        
-        img1_res = urllib.request.urlopen(req_img1)
-        img2_res = urllib.request.urlopen(req_img2)
-        
-        im1 = Image.open(BytesIO(img1_res.read())).convert("RGBA")
-        im2 = Image.open(BytesIO(img2_res.read())).convert("RGBA")
-        
-        target_height = 600
-        im1 = im1.resize((int(im1.width * (target_height / im1.height)), target_height))
-        im2 = im2.resize((int(im2.width * (target_height / im2.height)), target_height))
-        
-        try:
-            font = ImageFont.truetype("arial.ttf", size=135) # Increased size (from 110 to 135)
-        except IOError:
-            font = ImageFont.load_default()
+        def load_img(url, p):
+            im = Image.open(BytesIO(urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})).read())).convert("RGBA")
+            im = im.resize((int(im.width * (600 / im.height)), 600))
+            draw = ImageDraw.Draw(im)
+            try: font = ImageFont.truetype("arial.ttf", 135)
+            except: font = ImageFont.load_default()
+            draw.rectangle([im.width - 240, int(im.height * 0.22), im.width - 40, int(im.height * 0.22) + 150], fill=(50, 50, 50, 220), outline=(200, 200, 200), width=4)
+            draw.text((im.width - 240 + (200 - draw.textbbox((0, 0), str(p), font=font)[2])//2, int(im.height * 0.22) + 25), str(p), fill=(255, 255, 255), font=font)
+            return im
 
-        def draw_print_badge(card_image, print_num):
-            txt_img = card_image.copy()
-            draw = ImageDraw.Draw(txt_img)
-            text = f"{print_num}"
-            
-            # Larger box dimensions and moved lower down inside the top-right corner
-            box_width = 200
-            box_height = 150
-            x = txt_img.width - box_width - int(txt_img.width * 0.04)
-            y = int(txt_img.height * 0.22) # Increased Y position to move it lower down
-            
-            draw.rectangle([x, y, x + box_width, y + box_height], fill=(50, 50, 50, 220), outline=(200, 200, 200), width=4)
-            
-            text_bbox = draw.textbbox((0, 0), text, font=font)
-            text_width = text_bbox[2] - text_bbox[0]
-            text_height = text_bbox[3] - text_bbox[1]
-            
-            text_x = x + (box_width - text_width) // 2
-            text_y = y + (box_height - text_height) // 2 - 10
-            
-            draw.text((text_x, text_y), text, fill=(255, 255, 255), font=font)
-            return txt_img
-
-        im1 = draw_print_badge(im1, c1_print)
-        im2 = draw_print_badge(im2, c2_print)
-        
-        gap = 20
-        combined_width = im1.width + im2.width + gap
-        combined_image = Image.new("RGBA", (combined_width, target_height), (0, 0, 0, 0))
-        
-        combined_image.paste(im1, (0, 0))
-        combined_image.paste(im2, (im1.width + gap, 0))
+        im1, im2 = load_img(i1, p1), load_img(i2, p2)
+        combined = Image.new("RGBA", (im1.width + im2.width + 20, 600), (0, 0, 0, 0))
+        combined.paste(im1, (0, 0))
+        combined.paste(im2, (im1.width + 20, 0))
         
         buffer = BytesIO()
-        combined_image.save(buffer, format="PNG")
+        combined.save(buffer, format="PNG")
         buffer.seek(0)
         
-        file = discord.File(buffer, filename="drop.png")
-        view = MultiClaimView(c1_name, c2_name)
-        
-        description = f"1️⃣ **{c1_name}** `[Print #{c1_print}]` (*{c1_series}*)\n2️⃣ **{c2_name}** `[Print #{c2_print}]` (*{c2_series}*)"
-        embed = discord.Embed(
-            title=f"✨ {ctx.author.display_name} eli ig is dropping 2 cards!",
-            description=description,
-            color=discord.Color.blurple()
-        )
+        embed = discord.Embed(title=f"✨ {ctx.author.display_name} dropped 2 cards!", description=f"1️⃣ **{n1}** `[Print #{p1}]` (*{s1}*)\n2️⃣ **{n2}** `[Print #{p2}]` (*{s2}*)", color=discord.Color.blurple())
         embed.set_image(url="attachment://drop.png")
-        
-        await ctx.send(embed=embed, file=file, view=view)
+        await ctx.send(embed=embed, file=discord.File(buffer, filename="drop.png"), view=MultiClaimView(n1, n2))
     except Exception as e:
-        await ctx.send(f"Oops! Couldn't load the cards right now: {e}")
+        await ctx.send(f"Error: {e}")
 
 @drop.error
 async def drop_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
-        minutes = int(error.retry_after // 60)
-        seconds = int(error.retry_after % 60)
-        await ctx.send(f"⏳ {ctx.author.mention}, please wait **{minutes}m {seconds}s** before dropping cards again!")
+        await ctx.send(f"⏳ Wait **{int(error.retry_after//60)}m {int(error.retry_after%60)}s**.")
 
 @bot.command(name="daily")
 async def daily(ctx):
-    user_id = str(ctx.author.id)
-    current_time = time.time()
-    daily_cooldown = 86400  # 24 hours
-
     try:
         sha, content = await get_economy_data()
-        lines = content.splitlines()
-        
-        user_found = False
-        user_hearties = 0
-        user_coins = 0
-        last_vote_time = 0.0
-        last_daily_time = 0.0
+        user_id, t = str(ctx.author.id), time.time()
+        lines, user_found, coins = content.splitlines(), False, 0
         new_lines = []
 
         for line in lines:
             if "|" in line:
-                parts = [p.strip() for p in line.split("|")]
-                if parts[0] == user_id:
+                p = [x.strip() for x in line.split("|")]
+                if p[0] == user_id:
                     user_found = True
-                    
-                    try:
-                        user_hearties = int(float(parts[1])) if len(parts) > 1 and parts[1] != "" else 0
-                    except ValueError:
-                        user_hearties = 0
-                        
-                    try:
-                        user_coins = int(float(parts[2])) if len(parts) > 2 and parts[2] != "" else 0
-                    except ValueError:
-                        user_coins = 0
-                    
-                    try:
-                        last_vote_time = float(parts[3]) if len(parts) > 3 and parts[3] != "" else 0.0
-                    except ValueError:
-                        last_vote_time = 0.0
-                        
-                    try:
-                        last_daily_time = float(parts[4]) if len(parts) > 4 and parts[4] != "" else 0.0
-                    except ValueError:
-                        last_daily_time = 0.0
-                    
-                    if current_time - last_daily_time < daily_cooldown:
-                        left = int(daily_cooldown - (current_time - last_daily_time))
-                        hours = left // 3600
-                        mins = (left % 3600) // 60
-                        await ctx.send(f"⏳ {ctx.author.mention}, you already claimed your daily coins! Please wait **{hours}h {mins}m**.")
-                        return
-                    else:
-                        earned_coins = random.randint(12, 88)
-                        user_coins += earned_coins
-                        last_daily_time = current_time
-                        new_lines.append(f"{user_id} | {user_hearties} | {user_coins} | {last_vote_time} | {last_daily_time}")
-                        
-                        embed = discord.Embed(
-                            title="Daily Coiny",
-                            description=f"🎉 {ctx.author.mention}, you claimed your daily reward and received **{earned_coins}** <:coiny:1531623010727891065> coins!",
-                            color=discord.Color.green()
-                        )
-                        await ctx.send(embed=embed)
-                else:
-                    new_lines.append(line)
-            else:
-                if line.strip():
-                    new_lines.append(line)
+                    h, coins = int(float(p[1])), int(float(p[2]))
+                    v_time, d_time = float(p[3]) if len(p) > 3 and p[3] else 0.0, float(p[4]) if len(p) > 4 and p[4] else 0.0
+                    if t - d_time < 86400:
+                        left = int(86400 - (t - d_time))
+                        return await ctx.send(f"⏳ Wait **{left//3600}h {(left%3600)//60}m** for daily.")
+                    coins += random.randint(12, 88)
+                    new_lines.append(f"{user_id} | {h} | {coins} | {v_time} | {t}")
+                else: new_lines.append(line)
+            elif line.strip(): new_lines.append(line)
 
         if not user_found:
-            earned_coins = random.randint(12, 88)
-            user_coins = earned_coins
-            last_daily_time = current_time
-            new_lines.append(f"{user_id} | 0 | {user_coins} | 0.0 | {last_daily_time}")
-            
-            embed = discord.Embed(
-                title="Daily Coiny",
-                description=f"🎉 {ctx.author.mention}, you claimed your daily reward and received **{earned_coins}** <:coiny:1531623010727891065> coins!",
-                color=discord.Color.green()
-            )
-            await ctx.send(embed=embed)
+            coins = random.randint(12, 88)
+            new_lines.append(f"{user_id} | 0 | {coins} | 0.0 | {t}")
 
-        updated_content = "\n".join(new_lines) + "\n"
-        await save_economy_data(updated_content, sha, f"Daily coins reward for {ctx.author}")
-
+        await save_economy_data("\n".join(new_lines) + "\n", sha, f"Daily for {ctx.author}")
+        await ctx.send(embed=discord.Embed(title="Daily Coiny", description=f"🎉 Claimed **{coins}** <:coiny:1531623010727891065> coins!", color=discord.Color.green()))
     except Exception as e:
-        await ctx.send(f"Failed to process daily: {e}")
+        await ctx.send(f"Error: {e}")
 
 @bot.command(name="hearty", aliases=["balance", "bal", "inv", "einv", "einventory", "inventory"])
 async def hearty(ctx):
     try:
-        sha, content = await get_economy_data()
-        user_id = str(ctx.author.id)
-        user_hearties = 0
-        user_coins = 0
-
+        _, content = await get_economy_data()
+        h, c = 0, 0
         for line in content.splitlines():
             if "|" in line:
-                parts = [p.strip() for p in line.split("|")]
-                if parts[0] == user_id:
-                    user_hearties = int(float(parts[1])) if len(parts) > 1 and parts[1] != "" else 0
-                    user_coins = int(float(parts[2])) if len(parts) > 2 and parts[2] != "" else 0
+                p = [x.strip() for x in line.split("|")]
+                if p[0] == str(ctx.author.id):
+                    h, c = int(float(p[1])) if len(p) > 1 and p[1] else 0, int(float(p[2])) if len(p) > 2 and p[2] else 0
                     break
-
-        embed = discord.Embed(
-            title="Inventory",
-            description=f"Items carried by {ctx.author.mention}",
-            color=discord.Color.dark_theme()
-        )
-        embed.add_field(
-            name="Wallet",
-            value=f"<:coiny:1531623010727891065> **{user_coins}** · Coins\n<:hearty:1531623071067410504> **{user_hearties}** · Hearts",
-            inline=False
-        )
+        embed = discord.Embed(title="Inventory", description=f"Items carried by {ctx.author.mention}", color=discord.Color.dark_theme())
+        embed.add_field(name="Wallet", value=f"<:coiny:1531623010727891065> **{c}** · Coins\n<:hearty:1531623071067410504> **{h}** · Hearts", inline=False)
         await ctx.send(embed=embed)
     except Exception as e:
-        await ctx.send(f"Could not load inventory: {e}")
+        await ctx.send(f"Error: {e}")
 
 @bot.command(name="vote")
 async def vote(ctx):
-    vote_url = "https://top.gg/bot/1531222383980056648/vote"
-    user_id = str(ctx.author.id)
-    current_time = time.time()
-    vote_cooldown = 43200
-
     try:
         sha, content = await get_economy_data()
-        lines = content.splitlines()
-        
-        user_found = False
-        user_hearties = 0
-        user_coins = 0
-        last_vote_time = 0.0
-        last_daily_time = 0.0
-        new_lines = []
+        user_id, t = str(ctx.author.id), time.time()
+        lines, user_found, new_lines = content.splitlines(), False, []
 
         for line in lines:
             if "|" in line:
-                parts = [p.strip() for p in line.split("|")]
-                if parts[0] == user_id:
+                p = [x.strip() for x in line.split("|")]
+                if p[0] == user_id:
                     user_found = True
-                    user_hearties = int(float(parts[1])) if len(parts) > 1 and parts[1] != "" else 0
-                    user_coins = int(float(parts[2])) if len(parts) > 2 and parts[2] != "" else 0
-                    
-                    try:
-                        last_vote_time = float(parts[3]) if len(parts) > 3 and parts[3] != "" else 0.0
-                    except ValueError:
-                        last_vote_time = 0.0
-                        
-                    try:
-                        last_daily_time = float(parts[4]) if len(parts) > 4 and parts[4] != "" else 0.0
-                    except ValueError:
-                        last_daily_time = 0.0
-                    
-                    if current_time - last_vote_time < vote_cooldown:
-                        left = int(vote_cooldown - (current_time - last_vote_time))
-                        hours = left // 3600
-                        mins = (left % 3600) // 60
-                        await ctx.send(f"⏳ {ctx.author.mention}, you must wait **{hours}h {mins}m** before voting again!")
-                        return
-                    else:
-                        user_hearties += 1
-                        last_vote_time = current_time
-                        new_lines.append(f"{user_id} | {user_hearties} | {user_coins} | {last_vote_time} | {last_daily_time}")
-                else:
-                    new_lines.append(line)
-            else:
-                if line.strip():
-                    new_lines.append(line)
+                    h, coins = int(float(p[1])), int(float(p[2]))
+                    v_time, d_time = float(p[3]) if len(p) > 3 and p[3] else 0.0, float(p[4]) if len(p) > 4 and p[4] else 0.0
+                    if t - v_time < 43200:
+                        left = int(43200 - (t - v_time))
+                        return await ctx.send(f"⏳ Wait **{left//3600}h {(left%3600)//60}m** to vote.")
+                    h += 1
+                    new_lines.append(f"{user_id} | {h} | {coins} | {t} | {d_time}")
+                else: new_lines.append(line)
+            elif line.strip(): new_lines.append(line)
 
-        if not user_found:
-            user_hearties = 1
-            last_vote_time = current_time
-            new_lines.append(f"{user_id} | {user_hearties} | 0 | {last_vote_time} | 0.0")
-
-        updated_content = "\n".join(new_lines) + "\n"
-        await save_economy_data(updated_content, sha, f"Vote reward for {ctx.author}")
-
-        embed = discord.Embed(
-            title="Vote",
-            description=f"Use this link to vote for me\n{vote_url}",
-            color=discord.Color.purple()
-        )
-        view = VoteView(vote_url)
-        await ctx.send(embed=embed, view=view)
-
+        if not user_found: new_lines.append(f"{user_id} | 1 | 0 | {t} | 0.0")
+        await save_economy_data("\n".join(new_lines) + "\n", sha, f"Vote for {ctx.author}")
+        
+        url = "https://top.gg/bot/1531222383980056648/vote"
+        await ctx.send(embed=discord.Embed(title="Vote", description=f"Vote here:\n{url}", color=discord.Color.purple()), view=VoteView(url))
     except Exception as e:
-        await ctx.send(f"Failed to process vote: {e}")
+        await ctx.send(f"Error: {e}")
 
 @bot.command(name="cooldown")
 async def ecooldown(ctx):
-    user_id = ctx.author.id
-    current_time = time.time()
+    t = time.time()
+    drop_txt = f"**{int((drop_cmd:=bot.get_command('drop'))._buckets.get_bucket(ctx.message).get_retry_after()//60)}m**" if drop_cmd and (r:=drop_cmd._buckets.get_bucket(ctx.message).get_retry_after()) else "Ready!"
+    claim_txt = f"**{int((600 - (t - claim_cooldowns[ctx.author.id]))//60)}m**" if ctx.author.id in claim_cooldowns and t - claim_cooldowns[ctx.author.id] < 600 else "Ready!"
     
-    drop_command = bot.get_command("drop")
-    drop_text = "You can spawn a card now!"
-    
-    if drop_command:
-        bucket = drop_command._buckets.get_bucket(ctx.message)
-        if bucket:
-            retry_seconds = bucket.get_retry_after()
-            if retry_seconds:
-                dmins = int(retry_seconds // 60)
-                dsecs = int(retry_seconds % 60)
-                drop_text = f"**{dmins}m {dsecs}s** left to spawn a card again."
-
-    claim_text = "You can claim a card again now!"
-    if user_id in claim_cooldowns:
-        passed = current_time - claim_cooldowns[user_id]
-        if passed < 600:
-            left = int(600 - passed)
-            cmins = left // 60
-            csecs = left % 60
-            claim_text = f"**{cmins}m {csecs}s** left to claim a card again."
-
-    daily_text = "You can claim your daily coins now!"
-    vote_text = "You can vote for the bot now!"
+    v_txt, d_txt = "Ready!", "Ready!"
     try:
         _, content = await get_economy_data()
         for line in content.splitlines():
             if "|" in line:
-                parts = [p.strip() for p in line.split("|")]
-                if parts[0] == str(user_id):
-                    try:
-                        v_time = float(parts[3]) if len(parts) > 3 and parts[3] != "" else 0.0
-                    except ValueError:
-                        v_time = 0.0
-                        
-                    try:
-                        d_time = float(parts[4]) if len(parts) > 4 and parts[4] != "" else 0.0
-                    except ValueError:
-                        d_time = 0.0
-
-                    if v_time > 0:
-                        v_passed = current_time - v_time
-                        if v_passed < 43200:
-                            v_left = int(43200 - v_passed)
-                            vote_text = f"**{v_left // 3600}h {(v_left % 3600) // 60}m** left to vote for the bot again."
-                    if d_time > 0:
-                        d_passed = current_time - d_time
-                        if d_passed < 86400:
-                            d_left = int(86400 - d_passed)
-                            daily_text = f"**{d_left // 3600}h {(d_left % 3600) // 60}m** left to claim daily coins again."
+                p = [x.strip() for x in line.split("|")]
+                if p[0] == str(ctx.author.id):
+                    if len(p) > 3 and p[3] and (vt:=float(p[3])) and t - vt < 43200:
+                        v_txt = f"**{int(43200 - (t-vt))//3600}h**"
+                    if len(p) > 4 and p[4] and (dt:=float(p[4])) and t - dt < 86400:
+                        d_txt = f"**{int(86400 - (t-dt))//3600}h**"
                     break
-    except:
-        pass
+    except: pass
 
-    embed = discord.Embed(
-        title="Cooldowns",
-        description=f"Cooldown for {ctx.author.mention}\n\n"
-                    f"{drop_text}\n"
-                    f"{claim_text}\n"
-                    f"{daily_text}\n"
-                    f"{vote_text}\n"
-                    f"30 drops left for pity",
-        color=discord.Color.purple()
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(embed=discord.Embed(title="Cooldowns", description=f"Drop: {drop_txt}\nClaim: {claim_txt}\nDaily: {d_txt}\nVote: {v_txt}", color=discord.Color.purple()))
 
 @bot.command(name="collection", aliases=["ecollection", "ec"])
 async def collection(ctx):
     try:
-        url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
-        req_inv = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        response = urllib.request.urlopen(req_inv)
-        lines = response.read().decode('utf-8').splitlines()
-        
-        user_id = str(ctx.author.id)
-        user_cards = []
-        
-        for line in lines:
-            if "|" in line:
-                owner_id, card_name = line.split("|", 1)
-                if owner_id.strip() == user_id:
-                    user_cards.append(card_name.strip())
-                    
-        if not user_cards:
-            await ctx.send(f"📦 {ctx.author.mention}, your collection is empty! Claim cards when they drop.")
-            return
-            
-        total_cards = len(user_cards)
-        formatted_lines = []
-        
-        for index, card in enumerate(user_cards, start=1):
-            formatted_lines.append(f"`{index}` · {card}")
-            
-        card_list = "\n".join(formatted_lines)
-        
-        embed = discord.Embed(
-            title=f"🃏 {ctx.author.display_name}'s Card Collection",
-            description=card_list,
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text=f"1-{total_cards} of {total_cards} | Total Cards Owned: {total_cards}")
-        
-        await ctx.send(embed=embed)
+        cards = [card.strip() for line in (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt")).splitlines() if "|" in line for owner, card in [line.split("|", 1)] if owner.strip() == str(ctx.author.id)]
+        if not cards: return await ctx.send("📦 Collection empty.")
+        await ctx.send(embed=discord.Embed(title=f"🃏 {ctx.author.display_name}'s Collection", description="\n".join([f"`{i}` · {c}" for i, c in enumerate(cards, 1)]), color=discord.Color.blue()))
     except Exception as e:
-        await ctx.send(f"Could not load your collection: {e}")
+        await ctx.send(f"Error: {e}")
 
 @bot.command(name="view", aliases=["ev"])
-async def view(ctx, card_index: int):
+async def view(ctx, idx: int):
     try:
-        inv_url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
-        req_inv = urllib.request.Request(inv_url, headers={'User-Agent': 'Mozilla/5.0'})
-        inv_lines = urllib.request.urlopen(req_inv).read().decode('utf-8').splitlines()
+        cards = [card.strip() for line in (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt")).splitlines() if "|" in line for owner, card in [line.split("|", 1)] if owner.strip() == str(ctx.author.id)]
+        if not 1 <= idx <= len(cards): return await ctx.send("❌ Invalid index.")
         
-        user_id = str(ctx.author.id)
-        user_cards = []
+        target, series, img = cards[idx - 1].split("#")[0].strip().lower(), "Unknown", None
+        for line in (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt")).splitlines():
+            if line.count("|") >= 2:
+                p = [x.strip() for x in line.split("|", 2)]
+                if p[0].lower() == target: series, img = p[1], p[2]; break
         
-        for line in inv_lines:
-            if "|" in line:
-                owner_id, card_name = line.split("|", 1)
-                if owner_id.strip() == user_id:
-                    user_cards.append(card_name.strip())
-                    
-        if card_index < 1 or card_index > len(user_cards):
-            await ctx.send(f"❌ {ctx.author.mention}, invalid card number! Please pick a number between **1** and **{len(user_cards)}**.")
-            return
-            
-        stored_card_entry = user_cards[card_index - 1]
-        target_card_name = stored_card_entry.split("#")[0].strip()
-        
-        cards_url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt"
-        req_cards = urllib.request.Request(cards_url, headers={'User-Agent': 'Mozilla/5.0'})
-        card_lines = urllib.request.urlopen(req_cards).read().decode('utf-8').splitlines()
-        
-        card_image_url = None
-        card_series = "Unknown Series"
-        
-        for c_line in card_lines:
-            if c_line.count("|") >= 2:
-                parts = [p.strip() for p in c_line.split("|", 2)]
-                if parts[0].lower() == target_card_name.lower():
-                    card_series = parts[1]
-                    card_image_url = parts[2]
-                    break
-                    
-        if not card_image_url:
-            await ctx.send(f"⚠️ Found **{stored_card_entry}** in your inventory, but its image data couldn't be located in `cards.txt`.")
-            return
-            
-        embed = discord.Embed(
-            title=f"#{card_index} · {stored_card_entry}",
-            description=f"Series: *{card_series}*\nOwned by {ctx.author.mention}",
-            color=discord.Color.purple()
-        )
-        embed.set_image(url=card_image_url)
-        await ctx.send(embed=embed)
-        
+        if not img: return await ctx.send("⚠️ Image not found.")
+        await ctx.send(embed=discord.Embed(title=f"#{idx} · {cards[idx-1]}", description=f"Series: *{series}*", color=discord.Color.purple()).set_image(url=img))
     except Exception as e:
-        await ctx.send(f"Could not view the card: {e}")
+        await ctx.send(f"Error: {e}")
 
 @bot.command(name="trade", aliases=["et"])
 async def trade(ctx, member: discord.Member = None):
-    if not member and ctx.message.reference:
-        ref_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
-        member = ref_msg.author
-
-    if not member or member == ctx.author:
-        await ctx.send("❌ Please mention a user or reply to someone to start a trade!")
-        return
-
-    view = TradeRequestView(ctx.author, member)
-    embed = discord.Embed(
-        title="🤝 Trade Request",
-        description=f"{ctx.author.mention} has requested a trade with {member.mention}!\nClick **Accept** below to open the trade session.",
-        color=discord.Color.blurple()
-    )
-    await ctx.send(content=member.mention, embed=embed, view=view)
+    if not member and ctx.message.reference: member = (await ctx.channel.fetch_message(ctx.message.reference.message_id)).author
+    if not member or member == ctx.author: return await ctx.send("❌ Mention someone to trade!")
+    await ctx.send(content=member.mention, embed=discord.Embed(title="🤝 Trade Request", description=f"{ctx.author.mention} wants to trade with {member.mention}!", color=discord.Color.blurple()), view=TradeRequestView(ctx.author, member))
 
 @bot.command(name="add", aliases=["ea"])
 async def eadd(ctx, *, arg: str):
-    if ctx.channel.id not in active_trade_channels:
-        await ctx.send("❌ There is no active trade session in this channel!", delete_after=5)
-        try:
-            await ctx.message.delete()
-        except:
-            pass
+    if ctx.channel.id not in active_trade_channels or (view := active_trade_views.get(ctx.channel.id)).state != "active" or ctx.author not in (view.author, view.target):
+        try: await ctx.message.delete()
+        except: pass
         return
 
-    view = active_trade_views.get(ctx.channel.id)
-    if not view or view.state != "active" or ctx.author not in (view.author, view.target):
-        try:
-            await ctx.message.delete()
-        except:
-            pass
-        return
+    try: await ctx.message.delete()
+    except: pass
 
-    try:
-        await ctx.message.delete()
-    except:
-        pass
-
-    user = ctx.author
+    user, arg = ctx.author, arg.strip().lower()
     user_cards = await get_user_cards(user.id)
-    arg = arg.strip().lower()
 
-    if arg.isdigit():
-        card_idx = int(arg)
-        if 1 <= card_idx <= len(user_cards):
-            card_name = user_cards[card_idx - 1]
-            if user == view.author:
-                if card_name not in view.author_cards:
-                    view.author_cards.append(card_name)
-            else:
-                if card_name not in view.target_cards:
-                    view.target_cards.append(card_name)
+    if arg.isdigit() and 1 <= (idx := int(arg)) <= len(user_cards):
+        card = user_cards[idx - 1]
+        target_list = view.author_cards if user == view.author else view.target_cards
+        if card not in target_list: target_list.append(card)
     else:
         parts = arg.split()
-        if len(parts) >= 2:
-            try:
-                amount = int(parts[0])
-                currency_type = parts[1]
-                if "heart" in currency_type:
-                    if user == view.author:
-                        view.author_hearties += amount
-                    else:
-                        view.target_hearties += amount
-                elif "coin" in currency_type:
-                    if user == view.author:
-                        view.author_coins += amount
-                    else:
-                        view.target_coins += amount
-            except:
-                pass
-        elif len(parts) == 1:
-            currency_type = parts[0]
-            if "heart" in currency_type:
-                if user == view.author:
-                    view.author_hearties += 1
-                else:
-                    view.target_hearties += 1
-            elif "coin" in currency_type:
-                if user == view.author:
-                    view.author_coins += 100
-                else:
-                    view.target_coins += 100
+        amt = int(parts[0]) if parts and parts[0].isdigit() else 1
+        curr = parts[1] if len(parts) >= 2 else (parts[0] if parts else "")
+        
+        if "heart" in curr:
+            if user == view.author: view.author_hearties += amt if parts[0].isdigit() else 1
+            else: view.target_hearties += amt if parts[0].isdigit() else 1
+        elif "coin" in curr:
+            val = amt if parts[0].isdigit() else 100
+            if user == view.author: view.author_coins += val
+            else: view.target_coins += val
 
-    try:
-        if hasattr(view, 'message') and view.message:
-            await view.message.edit(embed=view.build_embed(), view=view)
-    except Exception as e:
-        print(f"Error updating trade embed: {e}")
+    if hasattr(view, 'message') and view.message:
+        await view.message.edit(embed=view.build_embed(), view=view)
 
 @bot.command(name="addcard")
-async def addcard(ctx, *, data_input: str):
-    if not GITHUB_TOKEN:
-        await ctx.send("Error: GITHUB_TOKEN environment variable is missing on Railway!")
-        return
-
-    parts = [p.strip() for p in data_input.split("|")]
-    if len(parts) < 3:
-        await ctx.send("❌ Incorrect format! Please use:\n`eaddcard Name | Series | ImageURL`")
-        return
-
-    name, series, image_url = parts[0], parts[1], parts[2]
+async def addcard(ctx, *, data: str):
+    if not GITHUB_TOKEN: return await ctx.send("Error: Missing GITHUB_TOKEN!")
+    parts = [p.strip() for p in data.split("|")]
+    if len(parts) < 3: return await ctx.send("❌ Format: `eaddcard Name | Series | URL`")
+    name, series, url = parts[0], parts[1], parts[2]
 
     try:
         api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/cards.txt"
-        
         try:
-            req = urllib.request.Request(api_url, headers={
-                "Authorization": f"Bearer {GITHUB_TOKEN}",
-                "Accept": "application/vnd.github+json",
-                "User-Agent": "Mozilla/5.0"
-            })
-            with urllib.request.urlopen(req) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                sha = data['sha']
-                current_content = base64.b64decode(data['content']).decode('utf-8')
+            res = json.loads(await _req(api_url))
+            sha, content = res['sha'], base64.b64decode(res['content']).decode('utf-8')
         except Exception:
-            sha = None
-            current_content = ""
+            sha, content = None, ""
 
-        new_content = current_content.strip() + "\n" + f"{name} | {series} | {image_url}" + "\n"
-        encoded_content = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
-
-        payload_data = {
-            "message": f"Add card {name} via Discord",
-            "content": encoded_content
-        }
-        if sha:
-            payload_data["sha"] = sha
-
-        payload = json.dumps(payload_data).encode('utf-8')
-
-        update_req = urllib.request.Request(api_url, data=payload, headers={
-            "Authorization": f"Bearer {GITHUB_TOKEN}",
-            "Accept": "application/vnd.github+json",
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0"
+        await _req(api_url, {
+            "message": f"Add {name}",
+            "content": base64.b64encode((content.strip() + f"\n{name} | {series} | {url}\n").encode('utf-8')).decode('utf-8'),
+            **({"sha": sha} if sha else {})
         }, method="PUT")
-
-        with urllib.request.urlopen(update_req):
-            pass
-
-        await ctx.send(f"✅ Successfully added new card: **{name}** from **{series}**!")
+        await ctx.send(f"✅ Added card: **{name}**!")
     except Exception as e:
-        await ctx.send(f"Failed to add card: {e}")
+        await ctx.send(f"Error: {e}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
