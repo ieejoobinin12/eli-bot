@@ -470,7 +470,7 @@ async def drop(ctx):
         im2 = im2.resize((int(im2.width * (target_height / im2.height)), target_height))
         
         try:
-            font = ImageFont.truetype("arial.ttf", size=110)
+            font = ImageFont.truetype("arial.ttf", size=135) # Increased size (from 110 to 135)
         except IOError:
             font = ImageFont.load_default()
 
@@ -479,11 +479,11 @@ async def drop(ctx):
             draw = ImageDraw.Draw(txt_img)
             text = f"{print_num}"
             
-            # Larger box dimensions and placed lower down inside the top-right corner
-            box_width = 180
-            box_height = 130
+            # Larger box dimensions and moved lower down inside the top-right corner
+            box_width = 200
+            box_height = 150
             x = txt_img.width - box_width - int(txt_img.width * 0.04)
-            y = int(txt_img.height * 0.12)
+            y = int(txt_img.height * 0.22) # Increased Y position to move it lower down
             
             draw.rectangle([x, y, x + box_width, y + box_height], fill=(50, 50, 50, 220), outline=(200, 200, 200), width=4)
             
