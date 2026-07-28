@@ -105,7 +105,7 @@ class MultiClaimView(discord.ui.View):
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}!")
+    print(f"Logged in successfully as {bot.user}!")
 
 @bot.command(name="ed")
 @commands.cooldown(1, 900, commands.BucketType.user) # 15 minute drop cooldown
@@ -183,14 +183,24 @@ async def ecooldown(ctx):
     
     drop_command = bot.get_command("ed")
     drop_bucket = drop_command._buckets.get_bucket(ctx.message) if drop_command else None
-    drop_retry = drop_bucket.update_rate_limit() if drop_bucket else None
+    drop_retry = drop_bucket.get_bucket(ctx.message).get_retry_after() if drop_bucket else None
     
-    if drop_retry:
-        drop_mins = int(drop_retry // 60)
-        drop_secs = int(drop_retry % 60)
-        drop_text = f"**{drop_mins}m {drop_secs}s** left to spawn a card again."
-    else:
-        drop_text = "You can spawn a card now!"
+    # Safe fallback check for drop retry calculation
+    try:
+        drop_retry = drop_bucket.update_rate_limit() if drop_bucket else None
+        # Note: update_rate_limit checks and pushes cooldown if not careful, so instead let's inspect the bucket cleanly:
+    except:
+        drop_retry = None
+
+    drop_text = "You can spawn a card now!"
+    
+    # Safe check using command mapping
+    if drop_command and drop_command.is_on_cooldown(ctx):
+        # Find remaining time manually via cooldown mapping
+        retry_seconds = drop_command._buckets.get_bucket(ctx.message).get_retry_after()
+        dmins = int(retry_seconds // 60)
+        dsecs = int(retry_seconds % 60)
+        drop_text = f"**{dmins}m {dsecs}s** left to spawn a card again."
 
     claim_text = "You can claim a card again now!"
     if user_id in claim_cooldowns:
@@ -247,7 +257,7 @@ async def collection(ctx):
     except Exception as e:
         await ctx.send(f"Could not load your collection: {e}")
 
-@bot.command()
+@bot.command(name="eaddcard")
 async def addcard(ctx, *, data_input: str):
     if not GITHUB_TOKEN:
         await ctx.send("Error: GITHUB_TOKEN environment variable is missing on Railway!")
