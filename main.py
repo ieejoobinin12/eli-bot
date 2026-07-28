@@ -483,8 +483,8 @@ async def drop_error(ctx, error):
         seconds = int(error.retry_after % 60)
         await ctx.send(f"⏳ {ctx.author.mention}, please wait **{minutes}m {seconds}s** before dropping cards again!")
 
-@bot.command(name="daily")
-async def daily(ctx):
+@bot.command(name="edaily")
+async def edaily(ctx):
     user_id = str(ctx.author.id)
     current_time = time.time()
     daily_cooldown = 86400  # 24 hours
@@ -496,8 +496,8 @@ async def daily(ctx):
         user_found = False
         user_hearties = 0
         user_coins = 0
-        last_vote_time = 0
-        last_daily_time = 0
+        last_vote_time = 0.0
+        last_daily_time = 0.0
         new_lines = []
 
         for line in lines:
@@ -505,12 +505,18 @@ async def daily(ctx):
                 parts = [p.strip() for p in line.split("|")]
                 if parts[0] == user_id:
                     user_found = True
-                    user_hearties = int(parts[1]) if len(parts) > 1 else 0
-                    user_coins = int(parts[2]) if len(parts) > 2 else 0
-                    # Check if there's a daily timestamp stored; we'll track it cleanly or use extra parts
-                    # Let's map economy.txt as: userid | hearties | coins | last_vote | last_daily
-                    last_vote_time = float(parts[3]) if len(parts) > 3 else 0
-                    last_daily_time = float(parts[4]) if len(parts) > 4 else 0
+                    user_hearties = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                    user_coins = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+                    
+                    try:
+                        last_vote_time = float(parts[3]) if len(parts) > 3 and parts[3] != "" else 0.0
+                    except ValueError:
+                        last_vote_time = 0.0
+                        
+                    try:
+                        last_daily_time = float(parts[4]) if len(parts) > 4 and parts[4] != "" else 0.0
+                    except ValueError:
+                        last_daily_time = 0.0
                     
                     if current_time - last_daily_time < daily_cooldown:
                         left = int(daily_cooldown - (current_time - last_daily_time))
@@ -540,7 +546,7 @@ async def daily(ctx):
             earned_coins = random.randint(12, 88)
             user_coins = earned_coins
             last_daily_time = current_time
-            new_lines.append(f"{user_id} | 0 | {user_coins} | 0 | {last_daily_time}")
+            new_lines.append(f"{user_id} | 0 | {user_coins} | 0.0 | {last_daily_time}")
             
             embed = discord.Embed(
                 title="Daily Coiny",
