@@ -386,9 +386,9 @@ async def execute_trade(author, target, author_cards, target_cards, author_heart
                 if "|" in line:
                     parts = [p.strip() for p in line.split("|")]
                     if len(parts) >= 3:
-                        eco_dict[parts[0]] = [int(parts[1]), int(parts[2]), parts[3] if len(parts) > 3 else "0"]
+                        eco_dict[parts[0]] = [int(float(parts[1])), int(float(parts[2])), parts[3] if len(parts) > 3 else "0"]
                     elif len(parts) == 2:
-                        eco_dict[parts[0]] = [int(parts[1]), 0, "0"]
+                        eco_dict[parts[0]] = [int(float(parts[1])), 0, "0"]
 
             if str(author.id) not in eco_dict:
                 eco_dict[str(author.id)] = [0, 0, "0"]
@@ -505,8 +505,16 @@ async def edaily(ctx):
                 parts = [p.strip() for p in line.split("|")]
                 if parts[0] == user_id:
                     user_found = True
-                    user_hearties = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-                    user_coins = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+                    
+                    try:
+                        user_hearties = int(float(parts[1])) if len(parts) > 1 and parts[1] != "" else 0
+                    except ValueError:
+                        user_hearties = 0
+                        
+                    try:
+                        user_coins = int(float(parts[2])) if len(parts) > 2 and parts[2] != "" else 0
+                    except ValueError:
+                        user_coins = 0
                     
                     try:
                         last_vote_time = float(parts[3]) if len(parts) > 3 and parts[3] != "" else 0.0
@@ -573,8 +581,8 @@ async def hearty(ctx):
             if "|" in line:
                 parts = [p.strip() for p in line.split("|")]
                 if parts[0] == user_id:
-                    user_hearties = int(parts[1]) if len(parts) > 1 else 0
-                    user_coins = int(parts[2]) if len(parts) > 2 else 0
+                    user_hearties = int(float(parts[1])) if len(parts) > 1 and parts[1] != "" else 0
+                    user_coins = int(float(parts[2])) if len(parts) > 2 and parts[2] != "" else 0
                     break
 
         embed = discord.Embed(
@@ -614,8 +622,8 @@ async def vote(ctx):
                 parts = [p.strip() for p in line.split("|")]
                 if parts[0] == user_id:
                     user_found = True
-                    user_hearties = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-                    user_coins = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+                    user_hearties = int(float(parts[1])) if len(parts) > 1 and parts[1] != "" else 0
+                    user_coins = int(float(parts[2])) if len(parts) > 2 and parts[2] != "" else 0
                     
                     try:
                         last_vote_time = float(parts[3]) if len(parts) > 3 and parts[3] != "" else 0.0
