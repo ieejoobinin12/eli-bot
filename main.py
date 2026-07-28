@@ -477,13 +477,24 @@ async def drop(ctx):
         def draw_print_badge(card_image, print_num):
             txt_img = card_image.copy()
             draw = ImageDraw.Draw(txt_img)
-            text = f"Print #{print_num}"
+            text = f"{print_num}"
             
-            x = 40
-            y = 40
+            x = int(txt_img.width * 0.72)
+            y = int(txt_img.height * 0.04)
             
-            draw.rectangle([x - 10, y - 10, x + 240, y + 65], fill=(0, 0, 0, 160))
-            draw.text((x, y), text, fill=(255, 255, 255), font=font)
+            box_width = 150
+            box_height = 80
+            
+            draw.rectangle([x, y, x + box_width, y + box_height], fill=(50, 50, 50, 220), outline=(200, 200, 200), width=4)
+            
+            text_bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            
+            text_x = x + (box_width - text_width) // 2
+            text_y = y + (box_height - text_height) // 2 - 5
+            
+            draw.text((text_x, text_y), text, fill=(255, 255, 255), font=font)
             return txt_img
 
         im1 = draw_print_badge(im1, c1_print)
