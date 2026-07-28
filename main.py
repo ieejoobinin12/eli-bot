@@ -19,7 +19,6 @@ REPO_NAME = "ieejoobinin12/eli-bot"
 
 claim_cooldowns = {}
 
-# Helper function to read/write economy data from economy.txt on GitHub
 async def get_economy_data():
     api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/economy.txt"
     try:
@@ -55,6 +54,11 @@ async def save_economy_data(new_content, sha, commit_message):
 
     with urllib.request.urlopen(update_req):
         pass
+
+class VoteView(discord.ui.View):
+    def __init__(self, vote_url: str):
+        super().__init__(timeout=180)
+        self.add_item(discord.ui.Button(label="Open vote page", url=vote_url, style=discord.ButtonStyle.link))
 
 class MultiClaimView(discord.ui.View):
     def __init__(self, card1_name: str, card2_name: str):
@@ -230,13 +234,10 @@ async def hearty(ctx):
 
 @bot.command(name="vote")
 async def vote(ctx):
-    if not GITHUB_TOKEN:
-        await ctx.send("Error: GITHUB_TOKEN is missing on Railway!")
-        return
-
+    vote_url = "https://top.gg/bot/1531222383980056648/vote"
     user_id = str(ctx.author.id)
     current_time = time.time()
-    vote_cooldown = 43200  # 12 hours in seconds
+    vote_cooldown = 43200
 
     try:
         sha, content = await get_economy_data()
@@ -257,7 +258,7 @@ async def vote(ctx):
                     
                     if current_time - last_vote_time < vote_cooldown:
                         left = int(vote_cooldown - (current_time - last_vote_time))
-                         hours = left // 3600
+                        hours = left // 3600
                         mins = (left % 3600) // 60
                         await ctx.send(f"⏳ {ctx.author.mention}, you must wait **{hours}h {mins}m** before voting again!")
                         return
@@ -279,7 +280,14 @@ async def vote(ctx):
         updated_content = "\n".join(new_lines) + "\n"
         await save_economy_data(updated_content, sha, f"Vote reward for {ctx.author}")
 
-        await ctx.send(f"🎉 Thank you for voting, {ctx.author.mention}! You received **1 hearty** 💖 (Total: {user_hearties})")
+        embed = discord.Embed(
+            title="Vote",
+            description=f"Use this link to vote for me\n{vote_url}",
+            color=discord.Color.purple()
+        )
+        view = VoteView(vote_url)
+        await ctx.send(embed=embed, view=view)
+
     except Exception as e:
         await ctx.send(f"Failed to process vote: {e}")
 
@@ -306,7 +314,6 @@ async def ecooldown(ctx):
             csecs = left % 60
             claim_text = f"**{cmins}m {csecs}s** left to claim a card again."
 
-    # Check Vote Cooldown for layout display
     vote_text = "You can vote for the bot now!"
     try:
         _, content = await get_economy_data()
@@ -361,7 +368,7 @@ async def collection(ctx):
         card_list = "\n".join([f"• {card}" for card in user_cards])
         
         embed = discord.Embed(
-            title=f"🃏 {ctx.author.display_name}'s Card Collection",
+            title=f" {ctx.author.display_name}'s Card Collection",
             description=card_list,
             color=discord.Color.blue()
         )
