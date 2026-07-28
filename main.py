@@ -470,7 +470,7 @@ async def drop(ctx):
         im2 = im2.resize((int(im2.width * (target_height / im2.height)), target_height))
         
         try:
-            font = ImageFont.truetype("arial.ttf", size=24)
+            font = ImageFont.truetype("arial.ttf", size=48)
         except IOError:
             font = ImageFont.load_default()
 
@@ -479,10 +479,10 @@ async def drop(ctx):
             draw = ImageDraw.Draw(txt_img)
             text = f"Print #{print_num}"
             
-            x = txt_img.width - 130
-            y = txt_img.height - 45
+            x = 40
+            y = 40
             
-            draw.rectangle([x - 5, y - 5, txt_img.width - 10, txt_img.height - 15], fill=(0, 0, 0, 160))
+            draw.rectangle([x - 10, y - 10, x + 240, y + 65], fill=(0, 0, 0, 160))
             draw.text((x, y), text, fill=(255, 255, 255), font=font)
             return txt_img
 
