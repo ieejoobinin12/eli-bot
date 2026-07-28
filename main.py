@@ -247,11 +247,25 @@ async def drop(ctx):
             im = im.resize((int(im.width * (600 / im.height)), 600))
             draw = ImageDraw.Draw(im)
             
-            try: 
-                font = ImageFont.truetype("arial.ttf", 64)
-            except: 
-                font = ImageFont.load_default()
+            # Scalable font logic (larger size = 64)
+            font_size = 64
+            font = None
+            font_paths = ["arial.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
             
+            for path in font_paths:
+                try:
+                    font = ImageFont.truetype(path, font_size)
+                    break
+                except OSError:
+                    continue
+            
+            if font is None:
+                try:
+                    font = ImageFont.load_default(size=font_size)
+                except TypeError:
+                    font = ImageFont.load_default()
+
+            # Original badge container size
             bw, bh = 98, 56
             bx = im.width - bw - int(im.width * 0.04)
             by = int(im.height * 0.04)
