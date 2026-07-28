@@ -3,6 +3,7 @@ import random
 import urllib.request
 import base64
 import json
+import time
 from io import BytesIO
 from PIL import Image
 import discord
@@ -16,6 +17,9 @@ bot = commands.Bot(command_prefix="e", intents=intents)
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 REPO_NAME = "ieejoobinin12/eli-bot"
 
+# Dictionaries to track manual cooldowns like claims per user ID
+claim_cooldowns = {}
+
 class MultiClaimView(discord.ui.View):
     def __init__(self, card1_name: str, card2_name: str):
         super().__init__(timeout=60)
@@ -23,8 +27,21 @@ class MultiClaimView(discord.ui.View):
         self.card2_name = card2_name
 
     async def claim_card(self, interaction: discord.Interaction, card_name: str, button: discord.ui.Button):
-        user_id = str(interaction.user.id)
-        entry = f"{user_id} | {card_name}"
+        user_id = interaction.user.id
+        current_time = time.time()
+        
+        # Check 10 minute (600 seconds) claim cooldown
+        if user_id in claim_cooldowns:
+            time_passed = current_time - claim_cooldowns[user_id]
+            if time_passed < 600:
+                left = int(600 - time_passed)
+                mins = left // 60
+                secs = left % 60
+                await interaction.response.send_message(f"⏳ You are on claim cooldown! Please wait **{mins}m {secs}s** before claiming again.", ephemeral=True)
+                return
+
+        user_id_str = str(interaction.user.id)
+        entry = f"{user_id_str} | {card_name}"
 
         if not GITHUB_TOKEN:
             await interaction.response.send_message("Error: GITHUB_TOKEN environment variable is missing on Railway!", ephemeral=True)
@@ -67,6 +84,9 @@ class MultiClaimView(discord.ui.View):
             with urllib.request.urlopen(update_req):
                 pass
 
+            # Set the user's claim cooldown timestamp
+            claim_cooldowns[user_id] = time.time()
+
             button.disabled = True
             button.label = f"Claimed by {interaction.user.display_name}"
             await interaction.message.edit(view=self)
@@ -87,8 +107,8 @@ class MultiClaimView(discord.ui.View):
 async def on_ready():
     print(f"Logged in as {bot.user}!")
 
-@bot.command()
-@commands.cooldown(1, 900, commands.BucketType.user)
+@bot.command(name="ed")
+@commands.cooldown(1, 900, commands.BucketType.user) # 15 minute drop cooldown
 async def drop(ctx):
     try:
         url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt"
@@ -156,7 +176,44 @@ async def drop_error(ctx, error):
         seconds = int(error.retry_after % 60)
         await ctx.send(f"⏳ {ctx.author.mention}, please wait **{minutes}m {seconds}s** before dropping cards again!")
 
-@bot.command()
+@bot.command(name="ecd")
+async def ecooldown(ctx):
+    user_id = ctx.author.id
+    current_time = time.time()
+    
+    drop_command = bot.get_command("ed")
+    drop_bucket = drop_command._buckets.get_bucket(ctx.message) if drop_command else None
+    drop_retry = drop_bucket.update_rate_limit() if drop_bucket else None
+    
+    if drop_retry:
+        drop_mins = int(drop_retry // 60)
+        drop_secs = int(drop_retry % 60)
+        drop_text = f"**{drop_mins}m {drop_secs}s** left to spawn a card again."
+    else:
+        drop_text = "You can spawn a card now!"
+
+    claim_text = "You can claim a card again now!"
+    if user_id in claim_cooldowns:
+        passed = current_time - claim_cooldowns[user_id]
+        if passed < 600:
+            left = int(600 - passed)
+            cmins = left // 60
+            csecs = left % 60
+            claim_text = f"**{cmins}m {csecs}s** left to claim a card again."
+
+    embed = discord.Embed(
+        title="Cooldowns",
+        description=f"Cooldown for {ctx.author.mention}\n\n"
+                    f"{drop_text}\n"
+                    f"{claim_text}\n"
+                    f"You can claim your daily coins now!\n"
+                    f"You can vote for the bot now!\n"
+                    f"30 drops left for pity",
+        color=discord.Color.purple()
+    )
+    await ctx.send(embed=embed)
+
+@bot.command(name="ec")
 async def collection(ctx):
     try:
         url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
