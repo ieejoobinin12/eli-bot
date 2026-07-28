@@ -470,7 +470,7 @@ async def drop(ctx):
         im2 = im2.resize((int(im2.width * (target_height / im2.height)), target_height))
         
         try:
-            font = ImageFont.truetype("arial.ttf", size=48)
+            font = ImageFont.truetype("arial.ttf", size=110)
         except IOError:
             font = ImageFont.load_default()
 
@@ -479,11 +479,11 @@ async def drop(ctx):
             draw = ImageDraw.Draw(txt_img)
             text = f"{print_num}"
             
-            # Positioned neatly INSIDE the top-right corner of the card image
-            box_width = 150
-            box_height = 80
+            # Larger box dimensions and placed lower down inside the top-right corner
+            box_width = 180
+            box_height = 130
             x = txt_img.width - box_width - int(txt_img.width * 0.04)
-            y = int(txt_img.height * 0.04)
+            y = int(txt_img.height * 0.12)
             
             draw.rectangle([x, y, x + box_width, y + box_height], fill=(50, 50, 50, 220), outline=(200, 200, 200), width=4)
             
@@ -492,7 +492,7 @@ async def drop(ctx):
             text_height = text_bbox[3] - text_bbox[1]
             
             text_x = x + (box_width - text_width) // 2
-            text_y = y + (box_height - text_height) // 2 - 5
+            text_y = y + (box_height - text_height) // 2 - 10
             
             draw.text((text_x, text_y), text, fill=(255, 255, 255), font=font)
             return txt_img
