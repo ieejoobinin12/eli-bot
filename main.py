@@ -605,8 +605,8 @@ async def vote(ctx):
         user_found = False
         user_hearties = 0
         user_coins = 0
-        last_vote_time = 0
-        last_daily_time = 0
+        last_vote_time = 0.0
+        last_daily_time = 0.0
         new_lines = []
 
         for line in lines:
@@ -614,10 +614,18 @@ async def vote(ctx):
                 parts = [p.strip() for p in line.split("|")]
                 if parts[0] == user_id:
                     user_found = True
-                    user_hearties = int(parts[1]) if len(parts) > 1 else 0
-                    user_coins = int(parts[2]) if len(parts) > 2 else 0
-                    last_vote_time = float(parts[3]) if len(parts) > 3 else 0
-                    last_daily_time = float(parts[4]) if len(parts) > 4 else 0
+                    user_hearties = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                    user_coins = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+                    
+                    try:
+                        last_vote_time = float(parts[3]) if len(parts) > 3 and parts[3] != "" else 0.0
+                    except ValueError:
+                        last_vote_time = 0.0
+                        
+                    try:
+                        last_daily_time = float(parts[4]) if len(parts) > 4 and parts[4] != "" else 0.0
+                    except ValueError:
+                        last_daily_time = 0.0
                     
                     if current_time - last_vote_time < vote_cooldown:
                         left = int(vote_cooldown - (current_time - last_vote_time))
@@ -638,7 +646,7 @@ async def vote(ctx):
         if not user_found:
             user_hearties = 1
             last_vote_time = current_time
-            new_lines.append(f"{user_id} | {user_hearties} | 0 | {last_vote_time} | 0")
+            new_lines.append(f"{user_id} | {user_hearties} | 0 | {last_vote_time} | 0.0")
 
         updated_content = "\n".join(new_lines) + "\n"
         await save_economy_data(updated_content, sha, f"Vote reward for {ctx.author}")
@@ -688,13 +696,23 @@ async def ecooldown(ctx):
             if "|" in line:
                 parts = [p.strip() for p in line.split("|")]
                 if parts[0] == str(user_id):
-                    if len(parts) > 3 and float(parts[3]) > 0:
-                        v_passed = current_time - float(parts[3])
+                    try:
+                        v_time = float(parts[3]) if len(parts) > 3 and parts[3] != "" else 0.0
+                    except ValueError:
+                        v_time = 0.0
+                        
+                    try:
+                        d_time = float(parts[4]) if len(parts) > 4 and parts[4] != "" else 0.0
+                    except ValueError:
+                        d_time = 0.0
+
+                    if v_time > 0:
+                        v_passed = current_time - v_time
                         if v_passed < 43200:
                             v_left = int(43200 - v_passed)
                             vote_text = f"**{v_left // 3600}h {(v_left % 3600) // 60}m** left to vote for the bot again."
-                    if len(parts) > 4 and float(parts[4]) > 0:
-                        d_passed = current_time - float(parts[4])
+                    if d_time > 0:
+                        d_passed = current_time - d_time
                         if d_passed < 86400:
                             d_left = int(86400 - d_passed)
                             daily_text = f"**{d_left // 3600}h {(d_left % 3600) // 60}m** left to claim daily coins again."
