@@ -235,7 +235,7 @@ async def hearty(ctx):
         )
         embed.add_field(
             name="Wallet",
-            value=f"🟠 **0** · Coins\n💖 **{user_hearties}** · Hearts",
+            value=f"<:coiny:1531623010727891065> **0** · Coins\n<:hearty:1531623071067410504> **{user_hearties}** · Hearts",
             inline=False
         )
         await ctx.send(embed=embed)
@@ -352,7 +352,7 @@ async def ecooldown(ctx):
                     f"{claim_text}\n"
                     f"You can claim your daily coins now!\n"
                     f"{vote_text}\n"
-                                   ,
+                    f"30 drops left for pity",
         color=discord.Color.purple()
     )
     await ctx.send(embed=embed)
