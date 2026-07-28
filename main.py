@@ -4,6 +4,7 @@ import urllib.request
 import base64
 import json
 import time
+import asyncio
 from io import BytesIO
 from PIL import Image
 import discord
@@ -18,6 +19,7 @@ GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 REPO_NAME = "ieejoobinin12/eli-bot"
 
 claim_cooldowns = {}
+active_trade_channels = set()
 
 async def get_economy_data():
     api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/economy.txt"
@@ -158,7 +160,7 @@ class MultiClaimView(discord.ui.View):
 
 class TradeSessionView(discord.ui.View):
     def __init__(self, author: discord.Member, target: discord.Member):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         self.author = author
         self.target = target
         
@@ -268,6 +270,7 @@ class TradeSessionView(discord.ui.View):
 
         if self.author_confirmed and self.target_confirmed:
             success = await execute_trade(self.author, self.target, self.author_cards, self.target_cards, self.author_hearties, self.target_hearties)
+            active_trade_channels.discard(interaction.channel_id)
             if success:
                 self.stop()
                 embed = discord.Embed(title="🤝 Trade Successful!", description=f"Trade between {self.author.mention} and {self.target.mention} completed successfully!", color=discord.Color.green())
@@ -283,6 +286,7 @@ class TradeSessionView(discord.ui.View):
         if interaction.user not in (self.author, self.target):
             await interaction.response.send_message("You are not part of this trade!", ephemeral=True)
             return
+        active_trade_channels.discard(interaction.channel_id)
         self.stop()
         embed = discord.Embed(title="❌ Trade Cancelled", description=f"Trade was cancelled by {interaction.user.mention}.", color=discord.Color.red())
         await interaction.response.edit_message(embed=embed, view=None)
@@ -303,11 +307,12 @@ class TradeRequestView(discord.ui.View):
         self.accepted = True
         self.stop()
         
+        active_trade_channels.add(interaction.channel_id)
         trade_view = TradeSessionView(self.author, self.target)
         embed = trade_view.build_embed()
         await interaction.response.edit_message(content=f"🤝 Trade started between {self.author.mention} and {self.target.mention}!", embed=embed, view=trade_view)
         
-        bot.loop.create_task(listen_for_trade_chat(interaction.channel, self.author, self.target, trade_view))
+        trade_view.message = interaction.message
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -317,18 +322,25 @@ class TradeRequestView(discord.ui.View):
         self.stop()
         await interaction.response.edit_message(content=f"❌ {self.target.mention} declined the trade request.", embed=None, view=None)
 
-async def listen_for_trade_chat(channel, author, target, trade_view):
-    def check(m):
-        return m.channel == channel and m.author in (author, target) and trade_view.state == "active"
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
 
-    while not trade_view.is_finished():
-        try:
-            msg = await bot.wait_for('message', timeout=300, check=check)
-            content = msg.content.strip().lower()
-            user = msg.author
-            
+    if message.channel.id in active_trade_channels:
+        # A trade is active in this channel, capture inputs
+        content = message.content.strip().lower()
+        user = message.author
+        
+        # We need to find the active trade view or message in this channel. 
+        # For simplicity, we can let messages pass through or delete them if they match trade syntax.
+        # Let's inspect the last messages or manage via global channel views mapping if needed, 
+        # but even simpler: let's process the input directly if the user is author or target.
+        # Wait, since multiple trade sessions could exist, let's keep track of views by channel id:
+        view = active_trade_views.get(message.channel.id)
+        if view and view.state == "active" and user in (view.author, view.target):
             try:
-                await msg.delete()
+                await message.delete()
             except:
                 pass
 
@@ -338,50 +350,77 @@ async def listen_for_trade_chat(channel, author, target, trade_view):
                 card_idx = int(content)
                 if 1 <= card_idx <= len(user_cards):
                     card_name = user_cards[card_idx - 1]
-                    if user == author:
-                        if card_name not in trade_view.author_cards:
-                            trade_view.author_cards.append(card_name)
+                    if user == view.author:
+                        if card_name not in view.author_cards:
+                            view.author_cards.append(card_name)
                     else:
-                        if card_name not in trade_view.target_cards:
-                            trade_view.target_cards.append(card_name)
+                        if card_name not in view.target_cards:
+                            view.target_cards.append(card_name)
             elif "hearty" in content or "hearties" in content:
                 parts = content.split()
                 try:
                     amount = int(parts[0])
-                    if user == author:
-                        trade_view.author_hearties += amount
+                    if user == view.author:
+                        view.author_hearties += amount
                     else:
-                        trade_view.target_hearties += amount
+                        view.target_hearties += amount
                 except:
-                    if user == author:
-                        trade_view.author_hearties += 1
+                    if user == view.author:
+                        view.author_hearties += 1
                     else:
-                        trade_view.target_hearties += 1
+                        view.target_hearties += 1
             elif "coiny" in content or "coins" in content:
                 parts = content.split()
                 try:
                     amount = int(parts[0])
-                    if user == author:
-                        trade_view.author_coins += amount
+                    if user == view.author:
+                        view.author_coins += amount
                     else:
-                        trade_view.target_coins += amount
+                        view.target_coins += amount
                 except:
-                    if user == author:
-                        trade_view.author_coins += 100
+                    if user == view.author:
+                        view.author_coins += 100
                     else:
-                        trade_view.target_coins += 100
+                        view.target_coins += 100
 
             try:
-                # Update the message embed dynamically via the stored view
-                # We can find the message or just send an update if we stored message ref, but let's edit via a separate approach if needed or let buttons handle updates. 
-                # Actually, standard way is to edit message via channel if message object is accessible, or let the user see updates when they click a button. Let's send a temporary notification or edit if possible.
-                pass
-            except:
-                pass
-        except asyncio.TimeoutError:
-            break
-        except Exception:
-            break
+                if hasattr(view, 'message') and view.message:
+                    await view.message.edit(embed=view.build_embed(), view=view)
+            except Exception as e:
+                print(f"Error updating trade embed: {e}")
+            return
+
+    await bot.process_commands(message)
+
+active_trade_views = {}
+
+# Patch TradeSessionView init to register itself
+_old_init = TradeSessionView.__init__
+def _new_init(self, author, target):
+    _old_init(self, author, target)
+    # Store globally when created inside accept
+TradeSessionView.__init__ = _new_init
+
+# Let's cleanly hook the accept button to store the view reference for chat input
+original_accept = TradeRequestView.accept
+async def patched_accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+    if interaction.user != self.target:
+        await interaction.response.send_message("This trade request is not for you!", ephemeral=True)
+        return
+    self.accepted = True
+    self.stop()
+    
+    active_trade_channels.add(interaction.channel_id)
+    trade_view = TradeSessionView(self.author, self.target)
+    active_trade_views[interaction.channel_id] = trade_view
+    
+    embed = trade_view.build_embed()
+    await interaction.response.edit_message(content=f"🤝 Trade started between {self.author.mention} and {self.target.mention}!", embed=embed, view=trade_view)
+    msg = await interaction.original_response()
+    trade_view.message = msg
+
+TradeRequestView.accept = patched_accept
+
 
 async def execute_trade(author, target, author_cards, target_cards, author_hearties, target_hearties):
     try:
@@ -398,8 +437,6 @@ async def execute_trade(author, target, author_cards, target_cards, author_heart
         lines = inv_content.splitlines()
         new_lines = []
 
-        # Remove cards from respective owners and add to new owners
-        # To handle multiple duplicates correctly, process line by line
         author_remaining_cards_to_give = list(author_cards)
         target_remaining_cards_to_give = list(target_cards)
 
@@ -437,7 +474,6 @@ async def execute_trade(author, target, author_cards, target_cards, author_heart
         with urllib.request.urlopen(update_req):
             pass
 
-        # Handle Hearties economy update
         if author_hearties > 0 or target_hearties > 0:
             eco_sha, eco_content = await get_economy_data()
             eco_lines = eco_content.splitlines()
@@ -448,12 +484,10 @@ async def execute_trade(author, target, author_cards, target_cards, author_heart
                     if len(parts) >= 2:
                         eco_dict[parts[0]] = [int(parts[1]), parts[2] if len(parts) > 2 else "0"]
 
-            # Adjust author hearties
             if str(author.id) not in eco_dict:
                 eco_dict[str(author.id)] = [0, "0"]
             eco_dict[str(author.id)][0] = eco_dict[str(author.id)][0] - author_hearties + target_hearties
 
-            # Adjust target hearties
             if str(target.id) not in eco_dict:
                 eco_dict[str(target.id)] = [0, "0"]
             eco_dict[str(target.id)][0] = eco_dict[str(target.id)][0] - target_hearties + author_hearties
