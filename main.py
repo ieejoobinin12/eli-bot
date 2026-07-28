@@ -19,6 +19,43 @@ REPO_NAME = "ieejoobinin12/eli-bot"
 
 claim_cooldowns = {}
 
+# Helper function to read/write economy data from economy.txt on GitHub
+async def get_economy_data():
+    api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/economy.txt"
+    try:
+        req = urllib.request.Request(api_url, headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Mozilla/5.0"
+        })
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            sha = data['sha']
+            content = base64.b64decode(data['content']).decode('utf-8')
+            return sha, content
+    except Exception:
+        return None, ""
+
+async def save_economy_data(new_content, sha, commit_message):
+    api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/economy.txt"
+    payload_data = {
+        "message": commit_message,
+        "content": base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
+    }
+    if sha:
+        payload_data["sha"] = sha
+
+    payload = json.dumps(payload_data).encode('utf-8')
+    update_req = urllib.request.Request(api_url, data=payload, headers={
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0"
+    }, method="PUT")
+
+    with urllib.request.urlopen(update_req):
+        pass
+
 class MultiClaimView(discord.ui.View):
     def __init__(self, card1_name: str, card2_name: str):
         super().__init__(timeout=60)
@@ -173,6 +210,79 @@ async def drop_error(ctx, error):
         seconds = int(error.retry_after % 60)
         await ctx.send(f"⏳ {ctx.author.mention}, please wait **{minutes}m {seconds}s** before dropping cards again!")
 
+@bot.command(name="hearty", aliases=["balance", "bal"])
+async def hearty(ctx):
+    try:
+        sha, content = await get_economy_data()
+        user_id = str(ctx.author.id)
+        user_hearties = 0
+
+        for line in content.splitlines():
+            if "|" in line:
+                parts = [p.strip() for p in line.split("|")]
+                if parts[0] == user_id:
+                    user_hearties = int(parts[1])
+                    break
+
+        await ctx.send(f"💖 {ctx.author.mention}, you have **{user_hearties}** hearty/hearties!")
+    except Exception as e:
+        await ctx.send(f"Could not load balance: {e}")
+
+@bot.command(name="vote")
+async def vote(ctx):
+    if not GITHUB_TOKEN:
+        await ctx.send("Error: GITHUB_TOKEN is missing on Railway!")
+        return
+
+    user_id = str(ctx.author.id)
+    current_time = time.time()
+    vote_cooldown = 43200  # 12 hours in seconds
+
+    try:
+        sha, content = await get_economy_data()
+        lines = content.splitlines()
+        
+        user_found = False
+        user_hearties = 0
+        last_vote_time = 0
+        new_lines = []
+
+        for line in lines:
+            if "|" in line:
+                parts = [p.strip() for p in line.split("|")]
+                if parts[0] == user_id:
+                    user_found = True
+                    user_hearties = int(parts[1])
+                    last_vote_time = float(parts[2]) if len(parts) > 2 else 0
+                    
+                    if current_time - last_vote_time < vote_cooldown:
+                        left = int(vote_cooldown - (current_time - last_vote_time))
+                         hours = left // 3600
+                        mins = (left % 3600) // 60
+                        await ctx.send(f"⏳ {ctx.author.mention}, you must wait **{hours}h {mins}m** before voting again!")
+                        return
+                    else:
+                        user_hearties += 1
+                        last_vote_time = current_time
+                        new_lines.append(f"{user_id} | {user_hearties} | {last_vote_time}")
+                else:
+                    new_lines.append(line)
+            else:
+                if line.strip():
+                    new_lines.append(line)
+
+        if not user_found:
+            user_hearties = 1
+            last_vote_time = current_time
+            new_lines.append(f"{user_id} | {user_hearties} | {last_vote_time}")
+
+        updated_content = "\n".join(new_lines) + "\n"
+        await save_economy_data(updated_content, sha, f"Vote reward for {ctx.author}")
+
+        await ctx.send(f"🎉 Thank you for voting, {ctx.author.mention}! You received **1 hearty** 💖 (Total: {user_hearties})")
+    except Exception as e:
+        await ctx.send(f"Failed to process vote: {e}")
+
 @bot.command(name="cooldown")
 async def ecooldown(ctx):
     user_id = ctx.author.id
@@ -196,13 +306,32 @@ async def ecooldown(ctx):
             csecs = left % 60
             claim_text = f"**{cmins}m {csecs}s** left to claim a card again."
 
+    # Check Vote Cooldown for layout display
+    vote_text = "You can vote for the bot now!"
+    try:
+        _, content = await get_economy_data()
+        for line in content.splitlines():
+            if "|" in line:
+                parts = [p.strip() for p in line.split("|")]
+                if parts[0] == str(user_id) and len(parts) > 2:
+                    last_vote = float(parts[2])
+                    v_passed = current_time - last_vote
+                    if v_passed < 43200:
+                        v_left = int(43200 - v_passed)
+                        v_hours = v_left // 3600
+                        v_mins = (v_left % 3600) // 60
+                        vote_text = f"**{v_hours}h {v_mins}m** left to vote for the bot again."
+                    break
+    except:
+        pass
+
     embed = discord.Embed(
         title="Cooldowns",
         description=f"Cooldown for {ctx.author.mention}\n\n"
                     f"{drop_text}\n"
                     f"{claim_text}\n"
                     f"You can claim your daily coins now!\n"
-                    f"You can vote for the bot now!\n"
+                    f"{vote_text}\n"
                     f"30 drops left for pity",
         color=discord.Color.purple()
     )
