@@ -357,7 +357,7 @@ async def ecooldown(ctx):
     )
     await ctx.send(embed=embed)
 
-@bot.command(name="collection")
+@bot.command(name="collection", aliases=["ecollection", "ec"])
 async def collection(ctx):
     try:
         url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
@@ -378,18 +378,76 @@ async def collection(ctx):
             await ctx.send(f"📦 {ctx.author.mention}, your collection is empty! Claim cards when they drop.")
             return
             
-        card_list = "\n".join([f"• {card}" for card in user_cards])
+        total_cards = len(user_cards)
+        formatted_lines = []
+        
+        for index, card in enumerate(user_cards, start=1):
+            formatted_lines.append(f"`{index}` · {card}")
+            
+        card_list = "\n".join(formatted_lines)
         
         embed = discord.Embed(
             title=f"🃏 {ctx.author.display_name}'s Card Collection",
             description=card_list,
             color=discord.Color.blue()
         )
-        embed.set_footer(text=f"Total Cards Owned: {len(user_cards)}")
+        embed.set_footer(text=f"1-{total_cards} of {total_cards} | Total Cards Owned: {total_cards}")
         
         await ctx.send(embed=embed)
     except Exception as e:
         await ctx.send(f"Could not load your collection: {e}")
+
+@bot.command(name="view", aliases=["ev"])
+async def view(ctx, card_index: int):
+    try:
+        inv_url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
+        req_inv = urllib.request.Request(inv_url, headers={'User-Agent': 'Mozilla/5.0'})
+        inv_lines = urllib.request.urlopen(req_inv).read().decode('utf-8').splitlines()
+        
+        user_id = str(ctx.author.id)
+        user_cards = []
+        
+        for line in inv_lines:
+            if "|" in line:
+                owner_id, card_name = line.split("|", 1)
+                if owner_id.strip() == user_id:
+                    user_cards.append(card_name.strip())
+                    
+        if card_index < 1 or card_index > len(user_cards):
+            await ctx.send(f"❌ {ctx.author.mention}, invalid card number! Please pick a number between **1** and **{len(user_cards)}**.")
+            return
+            
+        target_card_name = user_cards[card_index - 1]
+        
+        cards_url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt"
+        req_cards = urllib.request.Request(cards_url, headers={'User-Agent': 'Mozilla/5.0'})
+        card_lines = urllib.request.urlopen(req_cards).read().decode('utf-8').splitlines()
+        
+        card_image_url = None
+        card_series = "Unknown Series"
+        
+        for c_line in card_lines:
+            if c_line.count("|") >= 2:
+                parts = [p.strip() for p in c_line.split("|", 2)]
+                if parts[0].lower() == target_card_name.lower():
+                    card_series = parts[1]
+                    card_image_url = parts[2]
+                    break
+                    
+        if not card_image_url:
+            await ctx.send(f"⚠️ Found **{target_card_name}** in your inventory, but its image data couldn't be located in `cards.txt`.")
+            return
+            
+        embed = discord.Embed(
+            title=f"#{card_index} · {target_card_name}",
+            description=f"Series: *{card_series}*\nOwned by {ctx.author.mention}",
+            color=discord.Color.purple()
+        )
+        embed.set_image(url=card_image_url)
+        await ctx.send(embed=embed)
+        
+    except Exception as e:
+        await ctx.send(f"Could not view the card: {e}")
 
 @bot.command(name="addcard")
 async def addcard(ctx, *, data_input: str):
