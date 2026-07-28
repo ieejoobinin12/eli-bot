@@ -73,6 +73,24 @@ async def get_user_cards(user_id):
     except Exception:
         return []
 
+async def get_card_print_number(card_name: str):
+    try:
+        url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        lines = urllib.request.urlopen(req).read().decode('utf-8').splitlines()
+        
+        count = 0
+        for line in lines:
+            if "|" in line:
+                owner, card = line.split("|", 1)
+                # Strip out any existing print suffix from stored inventory lines for accurate counting
+                base_card = card.split("#")[0].strip()
+                if base_card.lower() == card_name.strip().lower():
+                    count += 1
+        return count + 1
+    except Exception:
+        return 1
+
 class VoteView(discord.ui.View):
     def __init__(self, vote_url: str):
         super().__init__(timeout=180)
@@ -98,7 +116,8 @@ class MultiClaimView(discord.ui.View):
                 return
 
         user_id_str = str(interaction.user.id)
-        entry = f"{user_id_str} | {card_name}"
+        print_num = await get_card_print_number(card_name)
+        entry = f"{user_id_str} | {card_name} #{print_num}"
 
         if not GITHUB_TOKEN:
             await interaction.response.send_message("Error: GITHUB_TOKEN environment variable is missing on Railway!", ephemeral=True)
@@ -124,7 +143,7 @@ class MultiClaimView(discord.ui.View):
             encoded_content = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
 
             payload_data = {
-                "message": f"Claim card {card_name} by {interaction.user}",
+                "message": f"Claim card {card_name} #{print_num} by {interaction.user}",
                 "content": encoded_content
             }
             if sha:
@@ -147,7 +166,7 @@ class MultiClaimView(discord.ui.View):
             button.label = f"Claimed by {interaction.user.display_name}"
             await interaction.message.edit(view=self)
             
-            await interaction.response.send_message(f"🎉 {interaction.user.mention}, you successfully claimed **{card_name}**!")
+            await interaction.response.send_message(f"🎉 {interaction.user.mention}, you successfully claimed **{card_name}** `[Print #{print_num}]`!")
         except Exception as e:
             await interaction.response.send_message(f"Failed to claim card: {e}", ephemeral=True)
 
@@ -294,7 +313,6 @@ class TradeSessionView(discord.ui.View):
         embed = discord.Embed(title="❌ Trade Cancelled", description=f"Trade was cancelled by {interaction.user.mention}.", color=discord.Color.red())
         await interaction.response.edit_message(embed=embed, view=None)
 
-
 class TradeRequestView(discord.ui.View):
     def __init__(self, author: discord.Member, target: discord.Member):
         super().__init__(timeout=60)
@@ -436,6 +454,9 @@ async def drop(ctx):
         c1_name, c1_series, img1_url = parts1[0].strip(), parts1[1].strip(), parts1[2].strip()
         c2_name, c2_series, img2_url = parts2[0].strip(), parts2[1].strip(), parts2[2].strip()
         
+        c1_print = await get_card_print_number(c1_name)
+        c2_print = await get_card_print_number(c2_name)
+        
         req_img1 = urllib.request.Request(img1_url, headers={'User-Agent': 'Mozilla/5.0'})
         req_img2 = urllib.request.Request(img2_url, headers={'User-Agent': 'Mozilla/5.0'})
         
@@ -463,7 +484,7 @@ async def drop(ctx):
         file = discord.File(buffer, filename="drop.png")
         view = MultiClaimView(c1_name, c2_name)
         
-        description = f"1️⃣ **{c1_name}** (*{c1_series}*)\n2️⃣ **{c2_name}** (*{c2_series}*)"
+        description = f"1️⃣ **{c1_name}** `[Print #{c1_print}]` (*{c1_series}*)\n2️⃣ **{c2_name}** `[Print #{c2_print}]` (*{c2_series}*)"
         embed = discord.Embed(
             title=f"✨ {ctx.author.display_name} eli ig is dropping 2 cards!",
             description=description,
@@ -799,7 +820,8 @@ async def view(ctx, card_index: int):
             await ctx.send(f"❌ {ctx.author.mention}, invalid card number! Please pick a number between **1** and **{len(user_cards)}**.")
             return
             
-        target_card_name = user_cards[card_index - 1]
+        stored_card_entry = user_cards[card_index - 1]
+        target_card_name = stored_card_entry.split("#")[0].strip()
         
         cards_url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt"
         req_cards = urllib.request.Request(cards_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -817,11 +839,11 @@ async def view(ctx, card_index: int):
                     break
                     
         if not card_image_url:
-            await ctx.send(f"⚠️ Found **{target_card_name}** in your inventory, but its image data couldn't be located in `cards.txt`.")
+            await ctx.send(f"⚠️ Found **{stored_card_entry}** in your inventory, but its image data couldn't be located in `cards.txt`.")
             return
             
         embed = discord.Embed(
-            title=f"#{card_index} · {target_card_name}",
+            title=f"#{card_index} · {stored_card_entry}",
             description=f"Series: *{card_series}*\nOwned by {ctx.author.mention}",
             color=discord.Color.purple()
         )
