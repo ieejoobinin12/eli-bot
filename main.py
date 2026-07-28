@@ -479,11 +479,11 @@ async def drop(ctx):
             draw = ImageDraw.Draw(txt_img)
             text = f"{print_num}"
             
-            x = int(txt_img.width * 0.72)
-            y = int(txt_img.height * 0.04)
-            
+            # Positioned neatly INSIDE the top-right corner of the card image
             box_width = 150
             box_height = 80
+            x = txt_img.width - box_width - int(txt_img.width * 0.04)
+            y = int(txt_img.height * 0.04)
             
             draw.rectangle([x, y, x + box_width, y + box_height], fill=(50, 50, 50, 220), outline=(200, 200, 200), width=4)
             
