@@ -395,7 +395,6 @@ async def execute_trade(author, target, author_cards, target_cards, author_heart
             if str(target.id) not in eco_dict:
                 eco_dict[str(target.id)] = [0, 0, "0"]
 
-            # Hearts index 0, Coins index 1, Vote timestamp index 2
             eco_dict[str(author.id)][0] = eco_dict[str(author.id)][0] - author_hearties + target_hearties
             eco_dict[str(author.id)][1] = eco_dict[str(author.id)][1] - author_coins + target_coins
 
@@ -483,8 +482,8 @@ async def drop_error(ctx, error):
         seconds = int(error.retry_after % 60)
         await ctx.send(f"⏳ {ctx.author.mention}, please wait **{minutes}m {seconds}s** before dropping cards again!")
 
-@bot.command(name="edaily")
-async def edaily(ctx):
+@bot.command(name="daily")
+async def daily(ctx):
     user_id = str(ctx.author.id)
     current_time = time.time()
     daily_cooldown = 86400  # 24 hours
