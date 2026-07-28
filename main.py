@@ -1,4 +1,4 @@
-import os
+                                import os
 import random
 import urllib.request
 import base64
@@ -17,7 +17,6 @@ bot = commands.Bot(command_prefix="e", intents=intents)
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
 REPO_NAME = "ieejoobinin12/eli-bot"
 
-# Dictionaries to track manual cooldowns like claims per user ID
 claim_cooldowns = {}
 
 class MultiClaimView(discord.ui.View):
@@ -30,7 +29,6 @@ class MultiClaimView(discord.ui.View):
         user_id = interaction.user.id
         current_time = time.time()
         
-        # Check 10 minute (600 seconds) claim cooldown
         if user_id in claim_cooldowns:
             time_passed = current_time - claim_cooldowns[user_id]
             if time_passed < 600:
@@ -84,7 +82,6 @@ class MultiClaimView(discord.ui.View):
             with urllib.request.urlopen(update_req):
                 pass
 
-            # Set the user's claim cooldown timestamp
             claim_cooldowns[user_id] = time.time()
 
             button.disabled = True
@@ -107,8 +104,8 @@ class MultiClaimView(discord.ui.View):
 async def on_ready():
     print(f"Logged in successfully as {bot.user}!")
 
-@bot.command(name="ed")
-@commands.cooldown(1, 900, commands.BucketType.user) # 15 minute drop cooldown
+@bot.command(name="drop")
+@commands.cooldown(1, 900, commands.BucketType.user)
 async def drop(ctx):
     try:
         url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt"
@@ -176,27 +173,15 @@ async def drop_error(ctx, error):
         seconds = int(error.retry_after % 60)
         await ctx.send(f"⏳ {ctx.author.mention}, please wait **{minutes}m {seconds}s** before dropping cards again!")
 
-@bot.command(name="ecd")
+@bot.command(name="cooldown")
 async def ecooldown(ctx):
     user_id = ctx.author.id
     current_time = time.time()
     
-    drop_command = bot.get_command("ed")
-    drop_bucket = drop_command._buckets.get_bucket(ctx.message) if drop_command else None
-    drop_retry = drop_bucket.get_bucket(ctx.message).get_retry_after() if drop_bucket else None
-    
-    # Safe fallback check for drop retry calculation
-    try:
-        drop_retry = drop_bucket.update_rate_limit() if drop_bucket else None
-        # Note: update_rate_limit checks and pushes cooldown if not careful, so instead let's inspect the bucket cleanly:
-    except:
-        drop_retry = None
-
+    drop_command = bot.get_command("drop")
     drop_text = "You can spawn a card now!"
     
-    # Safe check using command mapping
     if drop_command and drop_command.is_on_cooldown(ctx):
-        # Find remaining time manually via cooldown mapping
         retry_seconds = drop_command._buckets.get_bucket(ctx.message).get_retry_after()
         dmins = int(retry_seconds // 60)
         dsecs = int(retry_seconds % 60)
@@ -223,7 +208,7 @@ async def ecooldown(ctx):
     )
     await ctx.send(embed=embed)
 
-@bot.command(name="ec")
+@bot.command(name="collection")
 async def collection(ctx):
     try:
         url = "https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt"
@@ -257,7 +242,7 @@ async def collection(ctx):
     except Exception as e:
         await ctx.send(f"Could not load your collection: {e}")
 
-@bot.command(name="eaddcard")
+@bot.command(name="addcard")
 async def addcard(ctx, *, data_input: str):
     if not GITHUB_TOKEN:
         await ctx.send("Error: GITHUB_TOKEN environment variable is missing on Railway!")
