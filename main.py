@@ -20,6 +20,7 @@ REPO_NAME = "ieejoobinin12/eli-bot"
 
 claim_cooldowns = {}
 active_trade_channels = set()
+active_trade_views = {}
 
 async def get_economy_data():
     api_url = f"https://api.github.com/repos/{REPO_NAME}/contents/economy.txt"
@@ -237,7 +238,7 @@ class TradeSessionView(discord.ui.View):
         )
         
         if self.state == "active":
-            embed.set_footer(text="Type card numbers (e.g. '67') or currency ('1 hearty', '100 coiny') to add to your offer!")
+            embed.set_footer(text="Use 'eadd [number]' for cards or 'eadd [amount] hearty/coiny' to add to your offer!")
         elif self.state == "locked":
             embed.set_footer(text="Both parties locked! Click Confirm to finalize.")
         return embed
@@ -271,6 +272,7 @@ class TradeSessionView(discord.ui.View):
         if self.author_confirmed and self.target_confirmed:
             success = await execute_trade(self.author, self.target, self.author_cards, self.target_cards, self.author_hearties, self.target_hearties)
             active_trade_channels.discard(interaction.channel_id)
+            active_trade_views.pop(interaction.channel_id, None)
             if success:
                 self.stop()
                 embed = discord.Embed(title="🤝 Trade Successful!", description=f"Trade between {self.author.mention} and {self.target.mention} completed successfully!", color=discord.Color.green())
@@ -287,6 +289,7 @@ class TradeSessionView(discord.ui.View):
             await interaction.response.send_message("You are not part of this trade!", ephemeral=True)
             return
         active_trade_channels.discard(interaction.channel_id)
+        active_trade_views.pop(interaction.channel_id, None)
         self.stop()
         embed = discord.Embed(title="❌ Trade Cancelled", description=f"Trade was cancelled by {interaction.user.mention}.", color=discord.Color.red())
         await interaction.response.edit_message(embed=embed, view=None)
@@ -309,9 +312,10 @@ class TradeRequestView(discord.ui.View):
         
         active_trade_channels.add(interaction.channel_id)
         trade_view = TradeSessionView(self.author, self.target)
+        active_trade_views[interaction.channel_id] = trade_view
+        
         embed = trade_view.build_embed()
         await interaction.response.edit_message(content=f"🤝 Trade started between {self.author.mention} and {self.target.mention}!", embed=embed, view=trade_view)
-        
         trade_view.message = interaction.message
 
     @discord.ui.button(label="Decline", style=discord.ButtonStyle.danger)
@@ -321,106 +325,6 @@ class TradeRequestView(discord.ui.View):
             return
         self.stop()
         await interaction.response.edit_message(content=f"❌ {self.target.mention} declined the trade request.", embed=None, view=None)
-
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    if message.channel.id in active_trade_channels:
-        # A trade is active in this channel, capture inputs
-        content = message.content.strip().lower()
-        user = message.author
-        
-        # We need to find the active trade view or message in this channel. 
-        # For simplicity, we can let messages pass through or delete them if they match trade syntax.
-        # Let's inspect the last messages or manage via global channel views mapping if needed, 
-        # but even simpler: let's process the input directly if the user is author or target.
-        # Wait, since multiple trade sessions could exist, let's keep track of views by channel id:
-        view = active_trade_views.get(message.channel.id)
-        if view and view.state == "active" and user in (view.author, view.target):
-            try:
-                await message.delete()
-            except:
-                pass
-
-            user_cards = await get_user_cards(user.id)
-            
-            if content.isdigit():
-                card_idx = int(content)
-                if 1 <= card_idx <= len(user_cards):
-                    card_name = user_cards[card_idx - 1]
-                    if user == view.author:
-                        if card_name not in view.author_cards:
-                            view.author_cards.append(card_name)
-                    else:
-                        if card_name not in view.target_cards:
-                            view.target_cards.append(card_name)
-            elif "hearty" in content or "hearties" in content:
-                parts = content.split()
-                try:
-                    amount = int(parts[0])
-                    if user == view.author:
-                        view.author_hearties += amount
-                    else:
-                        view.target_hearties += amount
-                except:
-                    if user == view.author:
-                        view.author_hearties += 1
-                    else:
-                        view.target_hearties += 1
-            elif "coiny" in content or "coins" in content:
-                parts = content.split()
-                try:
-                    amount = int(parts[0])
-                    if user == view.author:
-                        view.author_coins += amount
-                    else:
-                        view.target_coins += amount
-                except:
-                    if user == view.author:
-                        view.author_coins += 100
-                    else:
-                        view.target_coins += 100
-
-            try:
-                if hasattr(view, 'message') and view.message:
-                    await view.message.edit(embed=view.build_embed(), view=view)
-            except Exception as e:
-                print(f"Error updating trade embed: {e}")
-            return
-
-    await bot.process_commands(message)
-
-active_trade_views = {}
-
-# Patch TradeSessionView init to register itself
-_old_init = TradeSessionView.__init__
-def _new_init(self, author, target):
-    _old_init(self, author, target)
-    # Store globally when created inside accept
-TradeSessionView.__init__ = _new_init
-
-# Let's cleanly hook the accept button to store the view reference for chat input
-original_accept = TradeRequestView.accept
-async def patched_accept(self, interaction: discord.Interaction, button: discord.ui.Button):
-    if interaction.user != self.target:
-        await interaction.response.send_message("This trade request is not for you!", ephemeral=True)
-        return
-    self.accepted = True
-    self.stop()
-    
-    active_trade_channels.add(interaction.channel_id)
-    trade_view = TradeSessionView(self.author, self.target)
-    active_trade_views[interaction.channel_id] = trade_view
-    
-    embed = trade_view.build_embed()
-    await interaction.response.edit_message(content=f"🤝 Trade started between {self.author.mention} and {self.target.mention}!", embed=embed, view=trade_view)
-    msg = await interaction.original_response()
-    trade_view.message = msg
-
-TradeRequestView.accept = patched_accept
-
 
 async def execute_trade(author, target, author_cards, target_cards, author_hearties, target_hearties):
     try:
@@ -499,7 +403,6 @@ async def execute_trade(author, target, author_cards, target_cards, author_heart
     except Exception as e:
         print(f"Trade error: {e}")
         return False
-
 
 @bot.event
 async def on_ready():
@@ -826,6 +729,80 @@ async def trade(ctx, member: discord.Member = None):
         color=discord.Color.blurple()
     )
     await ctx.send(content=member.mention, embed=embed, view=view)
+
+@bot.command(name="add", aliases=["ea"])
+async def eadd(ctx, *, arg: str):
+    if ctx.channel.id not in active_trade_channels:
+        await ctx.send("❌ There is no active trade session in this channel!", delete_after=5)
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+        return
+
+    view = active_trade_views.get(ctx.channel.id)
+    if not view or view.state != "active" or ctx.author not in (view.author, view.target):
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+        return
+
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+
+    user = ctx.author
+    user_cards = await get_user_cards(user.id)
+    arg = arg.strip().lower()
+
+    if arg.isdigit():
+        card_idx = int(arg)
+        if 1 <= card_idx <= len(user_cards):
+            card_name = user_cards[card_idx - 1]
+            if user == view.author:
+                if card_name not in view.author_cards:
+                    view.author_cards.append(card_name)
+            else:
+                if card_name not in view.target_cards:
+                    view.target_cards.append(card_name)
+    else:
+        parts = arg.split()
+        if len(parts) >= 2:
+            try:
+                amount = int(parts[0])
+                currency_type = parts[1]
+                if "heart" in currency_type:
+                    if user == view.author:
+                        view.author_hearties += amount
+                    else:
+                        view.target_hearties += amount
+                elif "coin" in currency_type:
+                    if user == view.author:
+                        view.author_coins += amount
+                    else:
+                        view.target_coins += amount
+            except:
+                pass
+        elif len(parts) == 1:
+            currency_type = parts[0]
+            if "heart" in currency_type:
+                if user == view.author:
+                    view.author_hearties += 1
+                else:
+                    view.target_hearties += 1
+            elif "coin" in currency_type:
+                if user == view.author:
+                    view.author_coins += 100
+                else:
+                    view.target_coins += 100
+
+    try:
+        if hasattr(view, 'message') and view.message:
+            await view.message.edit(embed=view.build_embed(), view=view)
+    except Exception as e:
+        print(f"Error updating trade embed: {e}")
 
 @bot.command(name="addcard")
 async def addcard(ctx, *, data_input: str):
