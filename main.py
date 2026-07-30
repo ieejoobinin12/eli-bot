@@ -313,10 +313,7 @@ async def daily(ctx):
                 if p[0] == user_id:
                     user_found = True
                     h, coins = int(float(p[1])), int(float(p[2]))
-                    v_time, d_time = float(p[3]) if len(p) > 3 and p[3] else 0.0, float(p[4]) if len(p) > 4 and p[4] else 0.0
-                    if t - d_time < 86400:
-                        left = int(86400 - (t - d_time))
-                        return await ctx.send(f"⏳ Wait **{left//3600}h {(left%3600)//60}m** for daily.")
+                    v_time = float(p[3]) if len(p) > 3 and p[3] else 0.0
                     coins += reward
                     new_lines.append(f"{user_id} | {h} | {coins} | {v_time} | {t}")
                 else: new_lines.append(line)
@@ -384,7 +381,7 @@ async def ecooldown(ctx):
     drop_txt = f"**{int((drop_cmd:=bot.get_command('drop'))._buckets.get_bucket(ctx.message).get_retry_after()//60)}m**" if drop_cmd and (r:=drop_cmd._buckets.get_bucket(ctx.message).get_retry_after()) else "Ready!"
     claim_txt = f"**{int((600 - (t - claim_cooldowns[ctx.author.id]))//60)}m**" if ctx.author.id in claim_cooldowns and t - claim_cooldowns[ctx.author.id] < 600 else "Ready!"
     
-    v_txt, d_txt = "Ready!", "Ready!"
+    v_txt = "Ready!"
     try:
         _, content = await get_economy_data()
         for line in content.splitlines():
@@ -393,12 +390,10 @@ async def ecooldown(ctx):
                 if p[0] == str(ctx.author.id):
                     if len(p) > 3 and p[3] and (vt:=float(p[3])) and t - vt < 43200:
                         v_txt = f"**{int(43200 - (t-vt))//3600}h**"
-                    if len(p) > 4 and p[4] and (dt:=float(p[4])) and t - dt < 86400:
-                        d_txt = f"**{int(86400 - (t-dt))//3600}h**"
                     break
     except: pass
 
-    await ctx.send(embed=discord.Embed(title="Cooldowns", description=f"Drop: {drop_txt}\nClaim: {claim_txt}\nDaily: {d_txt}\nVote: {v_txt}", color=discord.Color.purple()))
+    await ctx.send(embed=discord.Embed(title="Cooldowns", description=f"Drop: {drop_txt}\nClaim: {claim_txt}\nDaily: Ready! (No cooldown)\nVote: {v_txt}", color=discord.Color.purple()))
 
 @bot.command(name="collection", aliases=["ecollection", "ec"])
 async def collection(ctx):
