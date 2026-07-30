@@ -1,4 +1,4 @@
-import os, random, urllib.request, base64, json, time
+import os, random, urllib.request, urllib.error, base64, json, time
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import discord
@@ -25,6 +25,14 @@ async def _req(url, data=None, method="GET"):
     with urllib.request.urlopen(req) as res:
         return res.read().decode('utf-8')
 
+async def fetch_raw_github_file(filename):
+    try:
+        return await _req(f"https://raw.githubusercontent.com/{REPO_NAME}/main/{filename}")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return ""
+        raise e
+
 async def get_economy_data():
     try:
         res = json.loads(await _req(f"https://api.github.com/repos/{REPO_NAME}/contents/economy.txt"))
@@ -39,14 +47,16 @@ async def save_economy_data(content, sha, msg):
 
 async def get_user_cards(user_id):
     try:
-        lines = (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt")).splitlines()
+        raw_text = await fetch_raw_github_file("inventory.txt")
+        lines = raw_text.splitlines()
         return [card.strip() for line in lines if "|" in line for owner, card in [line.split("|", 1)] if owner.strip() == str(user_id)]
     except Exception:
         return []
 
 async def get_card_print_number(card_name: str):
     try:
-        lines = (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt")).splitlines()
+        raw_text = await fetch_raw_github_file("inventory.txt")
+        lines = raw_text.splitlines()
         return sum(1 for line in lines if "|" in line for owner, card in [line.split("|", 1)] if card.split("#")[0].strip().lower() == card_name.strip().lower()) + 1
     except Exception:
         return 1
@@ -233,21 +243,17 @@ async def on_ready(): print(f"Logged in as {bot.user}!")
 @commands.cooldown(1, 900, commands.BucketType.user)
 async def drop(ctx):
     try:
-        valid_cards = [line for line in (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt")).splitlines() if line.count("|") >= 2]
-        if len(valid_cards) < 2: return await ctx.send("Need at least 2 cards in `cards.txt`!")
-        
-        c1, c2 = random.sample(valid_cards, 2)
-        n1, s1, i1 = map(str.strip, c1.split("|", 2))
-        n2, s2, i2 = map(str.strip, c2.split("|", 2))
-        
-        p1, p2 = await get_card_print_number(n1), await get_card_print_number(n2)
-        
+        raw_cards = await fetch_raw_github_file("cards.txt")
+        valid_cards = [line for line in raw_cards.splitlines() if line.count("|") >= 2]
+        if len(valid_cards) < 2: 
+            return await ctx.send("Need at least 2 cards in `cards.txt`!")
+
         def load_img(url, p):
-            im = Image.open(BytesIO(urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})).read())).convert("RGBA")
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            im = Image.open(BytesIO(urllib.request.urlopen(req).read())).convert("RGBA")
             im = im.resize((int(im.width * (600 / im.height)), 600))
             draw = ImageDraw.Draw(im)
             
-            # --- PIXELLETTERS FONT CONFIGURATION ---
             font_size = 40
             font = None
             font_paths = ["pixelletters.ttf", "arial.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
@@ -265,7 +271,6 @@ async def drop(ctx):
                 except TypeError:
                     font = ImageFont.load_default()
 
-            # Original container size
             bw, bh = 98, 56
             bx = im.width - bw - int(im.width * 0.04)
             by = int(im.height * 0.04)
@@ -278,7 +283,22 @@ async def drop(ctx):
             draw.text((bx + (bw - tw) // 2, by + (bh - th) // 2 - 2), text_str, fill=(0, 0, 0), font=font)
             return im
 
-        im1, im2 = load_img(i1, p1), load_img(i2, p2)
+        # Try to load images securely (safeguard against broken image URLs)
+        for _ in range(5):
+            c1, c2 = random.sample(valid_cards, 2)
+            n1, s1, i1 = map(str.strip, c1.split("|", 2))
+            n2, s2, i2 = map(str.strip, c2.split("|", 2))
+            
+            p1, p2 = await get_card_print_number(n1), await get_card_print_number(n2)
+            try:
+                im1, im2 = load_img(i1, p1), load_img(i2, p2)
+                break
+            except Exception as img_err:
+                print(f"Skipping broken card image: {img_err}")
+                continue
+        else:
+            return await ctx.send("❌ Failed to load card images. Check image URLs in `cards.txt`.")
+
         combined = Image.new("RGBA", (im1.width + im2.width + 20, 600), (0, 0, 0, 0))
         combined.paste(im1, (0, 0))
         combined.paste(im2, (im1.width + 20, 0))
@@ -398,7 +418,8 @@ async def ecooldown(ctx):
 @bot.command(name="collection", aliases=["ecollection", "ec"])
 async def collection(ctx):
     try:
-        cards = [card.strip() for line in (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt")).splitlines() if "|" in line for owner, card in [line.split("|", 1)] if owner.strip() == str(ctx.author.id)]
+        raw_inv = await fetch_raw_github_file("inventory.txt")
+        cards = [card.strip() for line in raw_inv.splitlines() if "|" in line for owner, card in [line.split("|", 1)] if owner.strip() == str(ctx.author.id)]
         if not cards: return await ctx.send("📦 Collection empty.")
         await ctx.send(embed=discord.Embed(title=f"🃏 {ctx.author.display_name}'s Collection", description="\n".join([f"`{i}` · {c}" for i, c in enumerate(cards, 1)]), color=discord.Color.blue()))
     except Exception as e:
@@ -407,11 +428,13 @@ async def collection(ctx):
 @bot.command(name="view", aliases=["ev"])
 async def view(ctx, idx: int):
     try:
-        cards = [card.strip() for line in (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/inventory.txt")).splitlines() if "|" in line for owner, card in [line.split("|", 1)] if owner.strip() == str(ctx.author.id)]
+        raw_inv = await fetch_raw_github_file("inventory.txt")
+        cards = [card.strip() for line in raw_inv.splitlines() if "|" in line for owner, card in [line.split("|", 1)] if owner.strip() == str(ctx.author.id)]
         if not 1 <= idx <= len(cards): return await ctx.send("❌ Invalid index.")
         
         target, series, img = cards[idx - 1].split("#")[0].strip().lower(), "Unknown", None
-        for line in (await _req("https://raw.githubusercontent.com/ieejoobinin12/eli-bot/main/cards.txt")).splitlines():
+        raw_cards = await fetch_raw_github_file("cards.txt")
+        for line in raw_cards.splitlines():
             if line.count("|") >= 2:
                 p = [x.strip() for x in line.split("|", 2)]
                 if p[0].lower() == target: series, img = p[1], p[2]; break
