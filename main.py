@@ -303,7 +303,8 @@ async def daily(ctx):
     try:
         sha, content = await get_economy_data()
         user_id, t = str(ctx.author.id), time.time()
-        lines, user_found, coins = content.splitlines(), False, 0
+        lines, user_found = content.splitlines(), False
+        coins, reward = 0, random.randint(12, 88)
         new_lines = []
 
         for line in lines:
@@ -316,17 +317,17 @@ async def daily(ctx):
                     if t - d_time < 86400:
                         left = int(86400 - (t - d_time))
                         return await ctx.send(f"⏳ Wait **{left//3600}h {(left%3600)//60}m** for daily.")
-                    coins += random.randint(12, 88)
+                    coins += reward
                     new_lines.append(f"{user_id} | {h} | {coins} | {v_time} | {t}")
                 else: new_lines.append(line)
             elif line.strip(): new_lines.append(line)
 
         if not user_found:
-            coins = random.randint(12, 88)
+            coins = reward
             new_lines.append(f"{user_id} | 0 | {coins} | 0.0 | {t}")
 
         await save_economy_data("\n".join(new_lines) + "\n", sha, f"Daily for {ctx.author}")
-        await ctx.send(embed=discord.Embed(title="Daily Coiny", description=f"🎉 Claimed **{coins}** <:coiny:1531623010727891065> coins!", color=discord.Color.green()))
+        await ctx.send(embed=discord.Embed(title="Daily Coiny", description=f"🎉 Claimed **{reward}** <:coiny:1531623010727891065> coins!", color=discord.Color.green()))
     except Exception as e:
         await ctx.send(f"Error: {e}")
 
